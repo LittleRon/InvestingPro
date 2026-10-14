@@ -480,6 +480,103 @@
       "tags": ["个人", "研究"],
       "site_fulltext": false,
       "syndicate_fulltext": false
+    },
+
+    {
+      "id": "rss-stats-release",
+      "name": "国家统计局 · 数据发布",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.stats.gov.cn/sj/zxfb/rss.xml",
+        "_aihot": { "initialBackfillLimit": 10 }
+      },
+      "tier": "T1",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 360,
+      "tags": ["官方", "宏观数据"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-stats-interpretation",
+      "name": "国家统计局 · 数据解读",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.stats.gov.cn/sj/sjjd/rss.xml",
+        "_aihot": { "initialBackfillLimit": 10 }
+      },
+      "tier": "T1",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 360,
+      "tags": ["官方", "宏观数据"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-zqrb",
+      "name": "证券日报网",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "http://www.zqrb.cn/rss.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1_5",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["媒体", "A股"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-oxford-economics",
+      "name": "Oxford Economics",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.oxfordeconomics.com/feed/",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1_5",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 360,
+      "tags": ["研究", "宏观"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-tmtpost",
+      "name": "钛媒体",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.tmtpost.com/rss",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["媒体", "科技"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-199it",
+      "name": "199IT 互联网数据资讯中心",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "http://www.199it.com/feed",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["数据", "聚合"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
     }
   ]
 }

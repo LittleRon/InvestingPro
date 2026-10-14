@@ -37,14 +37,17 @@ InvestPro 是一个投资行业的信息采集与分析平台。它从一批高�
 
 ## 信源
 
-预置 30 个信源，全部经过可用性验证，分三级：
+预置 36 个信源，全部经过可用性验证，分三级：
 
 | 分级 | 信源 |
 |---|---|
-| T1 官方一手（21） | 美联储（新闻稿、讲话、执法命令、银行申请、FEDS Notes）、欧洲央行、英国央行、日本央行、SEC 新闻稿、EIA、纽约联储 Liberty Street Economics、Apple Newsroom，以及苹果/微软/英伟达/特斯拉/谷歌/亚马逊/Meta/摩根大通/伯克希尔的 SEC EDGAR 8-K 公告 |
-| T2 媒体与个人（9） | WSJ Markets、CNBC Economy/Finance、MarketWatch、Seeking Alpha Market Currents、OilPrice、Mining.com、Net Interest、The Overshoot |
+| T1 官方一手（23） | 美联储（新闻稿、讲话、执法命令、银行申请、FEDS Notes）、欧洲央行、英国央行、日本央行、SEC 新闻稿、EIA、纽约联储 Liberty Street Economics、Apple Newsroom、苹果/微软/英伟达/特斯拉/谷歌/亚马逊/Meta/摩根大通/伯克希尔的 SEC EDGAR 8-K 公告，以及**国家统计局数据发布**与**数据解读** |
+| T1.5 官方媒体与专业机构（2） | **证券日报网**（证监会指定披露媒体）、**Oxford Economics** |
+| T2 媒体与个人（11） | WSJ Markets、CNBC Economy/Finance、MarketWatch、Seeking Alpha Market Currents、OilPrice、Mining.com、Net Interest、The Overshoot，以及**钛媒体**、**199IT 数据资讯中心** |
 
 中文信源（微信公众号、X 账号）可在后台“信源”页按需添加：公众号需要极致了（Dajiala）的 key，X 需要 SocialData 的 key。字段说明见 [信源](docs/sources.md)。
+
+信源是分三级的关键：T1 门槛 60、T1.5 门槛 65、T2 门槛 76（两次评分之和 ≥ 2 × 门槛），所以分级直接决定一条消息能不能进精选。证监会、上交所、巨潮资讯、港交所这些官网只有动态加载的列表、没有可订阅的 feed，无法用 RSS/网页列表稳定抓取，因此没有预置；要用它们的数据，可以走后台的推送接口或公众号。
 
 ## 你会得到什么
 
@@ -75,6 +78,8 @@ docker compose up -d --build
 ```
 
 打开 <http://localhost:3000>。后台在 `/admin`，管理员密码在 `.env` 的 `ADMIN_PASSWORD` 里。一两分钟后开始有内容，第一次导入的资料大约半小时处理完。
+
+3000 端口被别的应用占了，就在 `.env` 里加一行 `PORT=8080`（换成一个空闲端口），同时把 `SITE_URL` 改成 `http://localhost:8080`——生成的链接、RSS 和分享图都按它拼。只想让本机的反向代理访问时写 `PORT=127.0.0.1:8080`。改完 `docker compose up -d` 即可，不用重新构建镜像。
 
 不用 Docker、在 Linux/macOS（Windows 用 WSL2）上直接跑、配域名和 HTTPS、服务器在中国大陆，见 [部署](docs/deploy.md)。
 

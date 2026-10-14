@@ -37,12 +37,13 @@ InvestPro collects material from high-confidence sources (central banks, regulat
 
 ## Sources
 
-30 preset sources, all verified working, in three tiers:
+36 preset sources, all verified working, in three tiers:
 
-- **T1 first-party (21)**: Federal Reserve (press, speeches, enforcement orders, banking applications, FEDS Notes), ECB, Bank of England, Bank of Japan, SEC press releases, EIA, Liberty Street Economics, Apple Newsroom, and SEC EDGAR 8-K filings for Apple, Microsoft, NVIDIA, Tesla, Alphabet, Amazon, Meta, JPMorgan and Berkshire.
-- **T2 media and professionals (9)**: WSJ Markets, CNBC Economy/Finance, MarketWatch, Seeking Alpha Market Currents, OilPrice, Mining.com, Net Interest, The Overshoot.
+- **T1 first-party (23)**: Federal Reserve (press, speeches, enforcement orders, banking applications, FEDS Notes), ECB, Bank of England, Bank of Japan, SEC press releases, EIA, Liberty Street Economics, Apple Newsroom, SEC EDGAR 8-K filings for Apple, Microsoft, NVIDIA, Tesla, Alphabet, Amazon, Meta, JPMorgan and Berkshire, plus China's National Bureau of Statistics (data releases and data interpretations).
+- **T1.5 official media and institutions (2)**: Securities Daily (a CSRC-designated disclosure outlet) and Oxford Economics.
+- **T2 media and professionals (11)**: WSJ Markets, CNBC Economy/Finance, MarketWatch, Seeking Alpha Market Currents, OilPrice, Mining.com, Net Interest, The Overshoot, TMTPost and 199IT.
 
-Chinese sources (WeChat accounts, X accounts) can be added in the admin's source page; see [sources](docs/sources.md).
+Chinese sources (WeChat accounts, X accounts) can be added in the admin's source page; see [sources](docs/sources.md). The CSRC, SSE, CNInfo and HKEX sites render their lists in the browser and expose no subscribable feed, so they are not preset; use the push API or a WeChat account for them.
 
 ## What you get
 

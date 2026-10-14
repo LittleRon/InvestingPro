@@ -20,6 +20,15 @@ SITE_URL=http://192.0.2.10:3000
 
 RSS、分享链接、站点地图和 Agent Markdown 中的绝对链接都使用这个值，不会随浏览器访问的地址自动改变。使用域名和 HTTPS 时按下方「配域名和 HTTPS」设置。
 
+本机 3000 端口已经被别的应用占了，就用 `PORT` 换一个（容器内的端口仍是 3000，不占本机的端口），`SITE_URL` 也要跟着改：
+
+```dotenv
+PORT=8080
+SITE_URL=http://192.0.2.10:8080
+```
+
+只让本机的反向代理访问时写 `PORT=127.0.0.1:8080`。改的是环境变量，不用重新构建镜像，`docker compose up -d` 就会按新端口重建 `web` 容器。
+
 配置完成后启动：
 
 ```bash
@@ -263,6 +272,8 @@ NODE_ENV=production node --env-file=.env apps/api/src/main.ts          # 接口�
 NODE_ENV=production node --env-file=.env apps/worker/src/main.ts       # 后台任务
 cd apps/web && NODE_ENV=production node --env-file=../../.env server.ts   # 网页，3000 端口
 ```
+
+不用 Docker 时，网页监听的端口由 `.env` 里的 `WEB_PORT` 决定（默认 3000），和别的应用冲突就写 `WEB_PORT=8080`；`SITE_URL` 同样要跟着改成 `http://localhost:8080`。接口是 `API_PORT`（默认 3001）。
 
 三个进程都要带 `NODE_ENV=production`。api 和 worker 不带它就按开发环境运行：启动时不检查生产密钥和管理员密码，`DEV_AUTH_ROLE` 免登录也会生效。
 
