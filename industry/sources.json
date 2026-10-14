@@ -1,0 +1,485 @@
+{
+  "$comment": "InvestPro 预置信源：首次启动时导入（scripts/seed.ts），已存在的不会被覆盖。之后在后台“信源”里新建、修改和暂停。全部地址在 2026-10 实测可抓；字段说明见 docs/customize.md。",
+  "sources": [
+    {
+      "id": "rss-fed-press",
+      "name": "美联储 新闻稿",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "fed",
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["官方", "央行"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-fed-speeches",
+      "name": "美联储 讲话与 testimony",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.federalreserve.gov/feeds/speeches.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "fed",
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["官方", "央行"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-fed-orders",
+      "name": "美联储 执法命令",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.federalreserve.gov/feeds/press_orders.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "fed",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "监管"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-fed-bcreg",
+      "name": "美联储 银行监管申请",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.federalreserve.gov/feeds/press_bcreg.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "fed",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "监管"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-feds-notes",
+      "name": "FEDS Notes（美联储研究）",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.federalreserve.gov/feeds/feds_notes.xml",
+        "_aihot": { "initialBackfillLimit": 6 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "fed",
+      "participation_mode": "editorial",
+      "interval_minutes": 360,
+      "tags": ["官方", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-liberty-street",
+      "name": "Liberty Street Economics（纽约联储）",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://libertystreeteconomics.newyorkfed.org/feed/",
+        "_aihot": { "initialBackfillLimit": 6 }
+      },
+      "tier": "T1",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 360,
+      "tags": ["官方", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-ecb-press",
+      "name": "欧洲央行 新闻稿",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.ecb.europa.eu/rss/press.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "ecb",
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["官方", "央行"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-boe-news",
+      "name": "英国央行 新闻",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.bankofengland.co.uk/rss/news",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "boe",
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["官方", "央行"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-boj-whatsnew",
+      "name": "日本央行 公告",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.boj.or.jp/en/rss/whatsnew.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "boj",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "央行"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-sec-press",
+      "name": "SEC 新闻稿",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/news/pressreleases.rss",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "sec",
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["官方", "监管"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-eia-today",
+      "name": "EIA Today in Energy",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.eia.gov/rss/todayinenergy.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "eia",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-apple-newsroom",
+      "name": "Apple Newsroom",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.apple.com/newsroom/rss-feed.rss",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "apple",
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["官方"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-aapl",
+      "name": "SEC EDGAR · Apple 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "apple",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-msft",
+      "name": "SEC EDGAR · Microsoft 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000789019&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "microsoft",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-nvda",
+      "name": "SEC EDGAR · NVIDIA 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "nvidia",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-tsla",
+      "name": "SEC EDGAR · Tesla 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001318605&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "tesla",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-googl",
+      "name": "SEC EDGAR · Alphabet 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001652044&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "alphabet",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-amzn",
+      "name": "SEC EDGAR · Amazon 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001018724&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "amazon",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-meta",
+      "name": "SEC EDGAR · Meta 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001326801&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "meta",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-jpm",
+      "name": "SEC EDGAR · JPMorgan 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000019617&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "jpmorgan",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-edgar-brk",
+      "name": "SEC EDGAR · Berkshire 8-K",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001067983&type=8-K&dateb=&owner=include&count=40&output=atom",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T1",
+      "owner_entity_id": "berkshire",
+      "participation_mode": "editorial",
+      "interval_minutes": 240,
+      "tags": ["官方", "公告"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-wsj-markets",
+      "name": "WSJ · Markets",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 60,
+      "tags": ["媒体"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-cnbc-economy",
+      "name": "CNBC · Economy",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 60,
+      "tags": ["媒体"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-cnbc-finance",
+      "name": "CNBC · Finance",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 60,
+      "tags": ["媒体"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-marketwatch-top",
+      "name": "MarketWatch · Top Stories",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.marketwatch.com/rss/topstories",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 60,
+      "tags": ["媒体"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-seekingalpha-currents",
+      "name": "Seeking Alpha · Market Currents",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://seekingalpha.com/market_currents.xml",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 60,
+      "tags": ["媒体"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-oilprice-main",
+      "name": "OilPrice",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://oilprice.com/rss/main",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 90,
+      "tags": ["媒体", "能源"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-mining-com",
+      "name": "Mining.com",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.mining.com/feed/",
+        "_aihot": { "initialBackfillLimit": 8 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 120,
+      "tags": ["媒体", "原材料"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-net-interest",
+      "name": "Net Interest（Marc Rubinstein）",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://www.netinterest.co/feed",
+        "_aihot": { "initialBackfillLimit": 6 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["个人", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    },
+    {
+      "id": "rss-overshoot",
+      "name": "The Overshoot（Matt Klein）",
+      "kind": "rss",
+      "config": {
+        "feedUrl": "https://theovershoot.co/feed",
+        "_aihot": { "initialBackfillLimit": 6 }
+      },
+      "tier": "T2",
+      "owner_entity_id": null,
+      "participation_mode": "editorial",
+      "interval_minutes": 180,
+      "tags": ["个人", "研究"],
+      "site_fulltext": false,
+      "syndicate_fulltext": false
+    }
+  ]
+}

@@ -1,0 +1,363 @@
+{
+  "groups": [
+    {
+      "key": "company",
+      "name": "机构与公司",
+      "blurb": "按央行、监管机构和上市公司追踪一手发布"
+    },
+    {
+      "key": "field",
+      "name": "市场与行业",
+      "blurb": "按资产类别与行业深挖：美股、A股、债券、黄金、科技……"
+    },
+    {
+      "key": "genre",
+      "name": "内容形态",
+      "blurb": "按内容类型浏览：宏观数据、财报、研究、资金流向……"
+    }
+  ],
+  "topics": [
+    {
+      "slug": "fed",
+      "name": "美联储 Federal Reserve",
+      "group": "company",
+      "entityId": "fed",
+      "definition": "美联储的全部一手信息：利率决议与声明、FOMC 会议纪要、官员讲话、执法命令与银行监管申请。"
+    },
+    {
+      "slug": "ecb",
+      "name": "欧洲央行 ECB",
+      "group": "company",
+      "entityId": "ecb",
+      "definition": "欧洲央行的新闻稿、货币政策决定、官员讲话与监管沟通的持续追踪。"
+    },
+    {
+      "slug": "boe",
+      "name": "英国央行 Bank of England",
+      "group": "company",
+      "entityId": "boe",
+      "definition": "英国央行的新闻与公告：利率决定、金融稳定报告、市场操作与监管动态。"
+    },
+    {
+      "slug": "boj",
+      "name": "日本央行 Bank of Japan",
+      "group": "company",
+      "entityId": "boj",
+      "definition": "日本央行的公告与统计发布：货币政策会议、金融市场监管与经济数据。"
+    },
+    {
+      "slug": "sec",
+      "name": "美国证监会 SEC",
+      "group": "company",
+      "entityId": "sec",
+      "definition": "SEC 的新闻稿：执法行动、规则制定、投资者警示与市场监督。"
+    },
+    {
+      "slug": "eia",
+      "name": "美国能源信息署 EIA",
+      "group": "company",
+      "entityId": "eia",
+      "definition": "EIA 的能源数据与分析：库存、产量、价格展望与能源市场解读。"
+    },
+    {
+      "slug": "apple",
+      "name": "苹果 Apple",
+      "group": "company",
+      "entityId": "apple",
+      "aliases": [
+        "Apple Newsroom"
+      ],
+      "definition": "苹果的全部动态：官方发布、财报与 8-K 重大事项公告。"
+    },
+    {
+      "slug": "nvidia",
+      "name": "英伟达 NVIDIA",
+      "group": "company",
+      "entityId": "nvidia",
+      "definition": "英伟达的官方动态与 8-K 公告：芯片发布、财报与重大事项。"
+    },
+    {
+      "slug": "microsoft",
+      "name": "微软 Microsoft",
+      "group": "company",
+      "entityId": "microsoft",
+      "definition": "微软的官方动态与 8-K 公告：云与 AI 业务、财报与重大事项。"
+    },
+    {
+      "slug": "tesla",
+      "name": "特斯拉 Tesla",
+      "group": "company",
+      "entityId": "tesla",
+      "definition": "特斯拉的官方动态与 8-K 公告：交付数据、财报与重大事项。"
+    },
+    {
+      "slug": "alphabet",
+      "name": "谷歌 Alphabet",
+      "group": "company",
+      "entityId": "alphabet",
+      "definition": "谷歌与 Alphabet 的官方动态与 8-K 公告：搜索与云业务、财报与重大事项。"
+    },
+    {
+      "slug": "amazon",
+      "name": "亚马逊 Amazon",
+      "group": "company",
+      "entityId": "amazon",
+      "definition": "亚马逊的官方动态与 8-K 公告：零售与 AWS、财报与重大事项。"
+    },
+    {
+      "slug": "meta",
+      "name": "Meta",
+      "group": "company",
+      "entityId": "meta",
+      "definition": "Meta 的官方动态与 8-K 公告：广告业务、财报与重大事项。"
+    },
+    {
+      "slug": "jpmorgan",
+      "name": "摩根大通 JPMorgan",
+      "group": "company",
+      "entityId": "jpmorgan",
+      "definition": "摩根大通的 8-K 公告与相关报道：银行业务、财报与重大事项。"
+    },
+    {
+      "slug": "berkshire",
+      "name": "伯克希尔 Berkshire",
+      "group": "company",
+      "entityId": "berkshire",
+      "definition": "伯克希尔的 8-K 公告与相关报道：持仓变动、年报季与重大事项。"
+    },
+    {
+      "slug": "us-stocks",
+      "name": "美股",
+      "group": "field",
+      "tags": [
+        "美股"
+      ],
+      "definition": "美国股市的动态：标普 500、纳斯达克与道琼斯的行情异动、财报季与机构调仓。"
+    },
+    {
+      "slug": "a-stocks",
+      "name": "A股",
+      "group": "field",
+      "tags": [
+        "A股"
+      ],
+      "definition": "中国 A 股动态：沪深市场行情、政策影响、行业轮动与北向资金。"
+    },
+    {
+      "slug": "hk-stocks",
+      "name": "港股",
+      "group": "field",
+      "tags": [
+        "港股"
+      ],
+      "definition": "香港股市动态：恒生指数、中概股、南向资金与港股 IPO。"
+    },
+    {
+      "slug": "stocks",
+      "name": "股票",
+      "group": "field",
+      "tags": [
+        "股票"
+      ],
+      "definition": "股票市场的整体动态：指数编成、交易规则、估值与市场结构变化。"
+    },
+    {
+      "slug": "bonds",
+      "name": "债券",
+      "group": "field",
+      "tags": [
+        "债券"
+      ],
+      "definition": "债券市场动态：美债与国债收益率、信用利差、久期与央行购债。"
+    },
+    {
+      "slug": "fx",
+      "name": "外汇",
+      "group": "field",
+      "tags": [
+        "外汇"
+      ],
+      "definition": "外汇市场动态：美元、人民币、日元与欧元汇率，以及央行干预。"
+    },
+    {
+      "slug": "gold",
+      "name": "黄金",
+      "group": "field",
+      "tags": [
+        "黄金"
+      ],
+      "definition": "黄金与贵金属动态：金价、央行购金、避险需求与实际利率。"
+    },
+    {
+      "slug": "oil",
+      "name": "原油",
+      "group": "field",
+      "tags": [
+        "原油"
+      ],
+      "definition": "原油与能源市场动态：油价、OPEC+ 产量、库存与地缘供应风险。"
+    },
+    {
+      "slug": "metals",
+      "name": "工业金属",
+      "group": "field",
+      "tags": [
+        "工业金属"
+      ],
+      "definition": "工业金属动态：铜、铝与铁矿石价格，以及供给需求与库存变化。"
+    },
+    {
+      "slug": "crypto",
+      "name": "加密资产",
+      "group": "field",
+      "tags": [
+        "加密资产"
+      ],
+      "definition": "加密资产动态：比特币、以太坊与稳定币，以及监管与机构采用进展。"
+    },
+    {
+      "slug": "realestate",
+      "name": "房地产",
+      "group": "field",
+      "tags": [
+        "房地产"
+      ],
+      "definition": "房地产市场动态：房贷利率、销售与开工数据、房企信用与政策。"
+    },
+    {
+      "slug": "tech",
+      "name": "科技行业",
+      "group": "field",
+      "tags": [
+        "科技"
+      ],
+      "definition": "科技行业动态：半导体、互联网与软件公司的财报、资本开支与产业趋势。"
+    },
+    {
+      "slug": "financials",
+      "name": "金融行业",
+      "group": "field",
+      "tags": [
+        "金融"
+      ],
+      "definition": "金融行业动态：银行、保险与证券公司的财报、监管与资本运作。"
+    },
+    {
+      "slug": "energy-sector",
+      "name": "能源行业",
+      "group": "field",
+      "tags": [
+        "能源"
+      ],
+      "definition": "能源行业动态：传统能源与新能源公司的财报、产能与政策。"
+    },
+    {
+      "slug": "healthcare",
+      "name": "医药行业",
+      "group": "field",
+      "tags": [
+        "医药"
+      ],
+      "definition": "医药与生物科技行业动态：研发进展、审批、集采与财报。"
+    },
+    {
+      "slug": "consumer",
+      "name": "消费行业",
+      "group": "field",
+      "tags": [
+        "消费"
+      ],
+      "definition": "消费行业动态：零售、白酒、家电与餐饮公司的财报与经营数据。"
+    },
+    {
+      "slug": "manufacturing",
+      "name": "制造业",
+      "group": "field",
+      "tags": [
+        "制造"
+      ],
+      "definition": "制造业动态：汽车、机械与工业公司的订单、产能与财报。"
+    },
+    {
+      "slug": "macro-data",
+      "name": "宏观数据",
+      "group": "genre",
+      "tags": [
+        "宏观数据"
+      ],
+      "definition": "宏观数据发布的第一时间记录：CPI、非农、GDP 与零售销售等官方数据。"
+    },
+    {
+      "slug": "central-bank",
+      "name": "央行政策",
+      "group": "genre",
+      "tags": [
+        "央行政策"
+      ],
+      "definition": "全球主要央行的政策动作：利率决议、缩表扩表与官员沟通。"
+    },
+    {
+      "slug": "market-moves",
+      "name": "市场行情",
+      "group": "genre",
+      "tags": [
+        "市场行情"
+      ],
+      "definition": "市场行情与异动记录：指数、汇市、商品的具体数字变化与制度调整。"
+    },
+    {
+      "slug": "earnings",
+      "name": "财报业绩",
+      "group": "genre",
+      "tags": [
+        "财报业绩"
+      ],
+      "definition": "上市公司财报与业绩指引：营收利润数字、前瞻指引与分红回购。"
+    },
+    {
+      "slug": "corporate",
+      "name": "公司事件",
+      "group": "genre",
+      "tags": [
+        "公司事件"
+      ],
+      "definition": "公司资本运作与重大事项：并购、IPO、重组、破产与股权变动。"
+    },
+    {
+      "slug": "policy",
+      "name": "政策监管",
+      "group": "genre",
+      "tags": [
+        "政策监管"
+      ],
+      "definition": "监管与政策动态：法规出台、执法处罚、贸易措施与产业政策。"
+    },
+    {
+      "slug": "research",
+      "name": "研究报告",
+      "group": "genre",
+      "tags": [
+        "研究报告"
+      ],
+      "definition": "值得读的研究：券商研报、机构白皮书与第三方数据研究。"
+    },
+    {
+      "slug": "fund-flows",
+      "name": "资金流向",
+      "group": "genre",
+      "tags": [
+        "资金流向"
+      ],
+      "definition": "资金流向与机构持仓：ETF 申赎、13F 与跨境资金变化。"
+    },
+    {
+      "slug": "opinions",
+      "name": "机构观点",
+      "group": "genre",
+      "tags": [
+        "机构观点"
+      ],
+      "definition": "机构与名家的策略观点、多空研判与市场评论。"
+    }
+  ]
+}
