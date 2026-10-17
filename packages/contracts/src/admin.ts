@@ -287,6 +287,19 @@ export interface AdminRuns {
   errors: Array<{ error: string; n: number; last: Timestamp; example: string }>;
   retrying: { count: number; next: Timestamp | null };
   ingest: Array<{ client: string; kind: string; status: string; error: string | null; summary: unknown; created_at: Timestamp }>;
+  /**
+   * Automatic collection. `auto` is the operator's switch (settings, changed from the runs page);
+   * `registered` is the deployment's valve: false when the worker runs without COLLECT_ENABLED, so a
+   * manual round enqueues fetch jobs nobody picks up.
+   */
+  collection: {
+    auto: boolean;
+    registered: boolean;
+    /** Sources whose next_fetch_at has come: what "立即采集一轮" would fetch now. */
+    due: number;
+    updatedAt: Timestamp | null;
+    updatedBy: string | null;
+  };
   /** Each module's part of the page, under its name (what its server module's admin.runs returns). */
   modules: Record<string, unknown>;
 }

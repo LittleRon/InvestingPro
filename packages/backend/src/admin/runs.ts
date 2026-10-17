@@ -7,6 +7,7 @@ import type { Heartbeat } from "../operations/heartbeat.ts";
 import { audit } from "../audit.ts";
 import { failureGroupSql, requeueFailed } from "../jobs/content.ts";
 import { groupingOverview, waitingSelectedNews } from "../operations/grouping.ts";
+import { collectionOverview } from "../sources/autopilot.ts";
 import { serverModules } from "../modules.ts";
 
 const STALE_HEARTBEAT_MS = 3 * 60_000;
@@ -28,6 +29,7 @@ export async function runsOverview(): Promise<Runs> {
     errors,
     ingest,
     grouping,
+    collection,
     [retrying],
     modules,
   ] = await Promise.all([
@@ -76,6 +78,7 @@ export async function runsOverview(): Promise<Runs> {
       FROM articles WHERE processing_state = 'failed' AND discovered_at > now() - interval '30 days' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`,
     sql<Runs["ingest"]>`SELECT client, kind, status, left(error, 200) AS error, summary, created_at FROM ingest_events ORDER BY created_at DESC, id DESC LIMIT 20`,
     waitingSelectedNews(),
+    collectionOverview(),
     // Articles waiting to retry after a passing provider problem (they are not failed).
     sql<{ n: number; next: Date | null }[]>`
       SELECT count(*)::int AS n, min(processing_retry_at) AS next FROM articles WHERE processing_state = 'new' AND processing_attempts > 0`,
@@ -101,6 +104,7 @@ export async function runsOverview(): Promise<Runs> {
     errors,
     retrying: { count: retrying?.n ?? 0, next: retrying?.next ?? null },
     ingest,
+    collection,
     modules: Object.fromEntries(modules),
   };
 }

@@ -16,11 +16,14 @@ import { GROUPING_WARN_AFTER_MS, waitingSelectedNews } from "./grouping.ts";
 import { upstreamFindings } from "../media/upstream.ts";
 import { responder, serverModules } from "../modules.ts";
 import { sourceHealth, sourceHealthList } from "../sources/health.ts";
+import { autoCollectEnabled } from "../sources/autopilot.ts";
 
 const REPEAT_MS: Record<Exclude<Level, "later">, number> = { now: 3600_000, today: 24 * 3600_000 };
 
 // Valves default off: read at call time, only an explicit "true" turns them on.
-const collecting = () => process.env.COLLECT_ENABLED === "true";
+// Collection is also off while the operator has paused it on the runs page: a deliberate pause is not
+// a broken feed, and must not raise "内容不再更新" or the source-health follow-ups.
+const collecting = async () => process.env.COLLECT_ENABLED === "true" && (await autoCollectEnabled());
 const modelsOn = () => process.env.MODEL_CALLS_ENABLED === "true";
 /**
  * How long the site may go without a new article before it counts as stalled (ALERT_QUIET_MINUTES, else
@@ -37,7 +40,7 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
   // a site that stops changing. Skipped for 20 minutes after the worker starts, and where the valves are off.
   const [hb] = await sql<{ value: { startedAt?: string } }[]>`SELECT value FROM settings WHERE key = 'heartbeat.worker'`;
   const settled = !hb?.value.startedAt || now - Date.parse(hb.value.startedAt) > 20 * 60_000;
-  if (settled && collecting()) {
+  if (settled && (await collecting())) {
     const [last] = await sql<{ at: Date | null }[]>`SELECT max(a.discovered_at) AS at FROM articles a
       JOIN sources s ON s.id = a.source_id WHERE s.participation_mode = 'editorial' AND a.discovered_at > now() - interval '1 day'`;
     if (!last?.at || now - last.at.getTime() > QUIET_MINUTES * 60_000) {
@@ -57,7 +60,7 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
       }
     }
   }
-  if (settled && collecting() && modelsOn()) {
+  if (settled && (await collecting()) && modelsOn()) {
     const waiting = (await waitingSelectedNews()).filter((item) => now - item.since.getTime() >= GROUPING_WARN_AFTER_MS);
     if (waiting.length) {
       const manual = waiting.filter((item) => item.recovery === "manual").length;
@@ -152,7 +155,7 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
   for (const m of serverModules()) if (m.alerts) out.push(...(await m.alerts(now)));
 
   // Follow-ups
-  if (collecting()) {
+  if (await collecting()) {
     for (const group of await sourceHealth(now)) {
       if (group.failing.length) out.push({
         key: `sources.failing.${group.mode}`, level: "later", title: `${group.name}有 ${group.failing.length} 个信源连续抓取失败`,

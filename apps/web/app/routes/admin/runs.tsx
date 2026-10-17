@@ -31,6 +31,9 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
   const [outcome, setOutcome] = useState<"sent" | "drop" | "resend">("sent");
   // Failure group to put back into processing ("" = every failure of the last 30 days).
   const [requeue, setRequeue] = useState<string | null>(null);
+  // The collection switch: null closed, otherwise the value being switched to; "round" is one manual round.
+  const [autopilot, setAutopilot] = useState<boolean | null>(null);
+  const [round, setRound] = useState(false);
 
   // Live view: refresh every 20 s while visible.
   useEffect(() => {
@@ -57,6 +60,32 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
         <Stat label="回执结果未知" value={num(r.receipts.issues.filter((x) => x.status === "unknown").length)} tone={r.receipts.issues.some((x) => x.status === "unknown") ? "bad" : "ok"} hint={`7 天 ${num(Object.values(r.receipts.counts).reduce((a, b) => a + b, 0))} 次付费请求`} />
         <Stat label="投递待核实" value={num(r.deliveries.filter((d) => d.status === "unknown").length)} tone={r.deliveries.some((d) => d.status === "unknown") ? "bad" : "ok"} />
       </div>
+
+      <Card
+        className="mb-5"
+        title="采集"
+        right={
+          <Badge tone={!r.collection.registered ? "warn" : r.collection.auto ? "ok" : "muted"}>
+            {!r.collection.registered ? "worker 未开启采集" : r.collection.auto ? "自动采集中" : "已暂停自动采集"}
+          </Badge>
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 text-[13px]">
+          <p className="text-ink-3">
+            暂停后只有定时任务停手，已存的内容照常分析、归组与发布，单个信源的「立即采集」仍然可用。
+            {r.collection.updatedAt && <span className="ml-1">上次切换 <Time at={r.collection.updatedAt} />{r.collection.updatedBy ? ` · ${r.collection.updatedBy}` : ""}</span>}
+            {!r.collection.registered && <span className="ml-1 text-amber">worker 没带 COLLECT_ENABLED 启动，采集任务会排队但没人接。</span>}
+          </p>
+          <span className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setRound(true)} disabled={!r.collection.registered || r.collection.due === 0}>
+              立即采集一轮{r.collection.due > 0 ? `（${num(r.collection.due)} 个信源到期）` : "（没有到期信源）"}
+            </Button>
+            <Button size="sm" tone={r.collection.auto ? "danger" : "primary"} onClick={() => setAutopilot(!r.collection.auto)}>
+              {r.collection.auto ? "暂停自动采集" : "恢复自动采集"}
+            </Button>
+          </span>
+        </div>
+      </Card>
 
       {r.grouping.waiting > 0 && (
         <Card className="mb-5" title="等待去重确认的精选" right={<span>{num(r.grouping.waiting)} 条等待 · {num(r.grouping.needsAttention)} 条超过 10 分钟</span>} pad={false} scrollable>
@@ -263,6 +292,30 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
           </Select>
         </Field>
       </ReasonDialog>
+      <ReasonDialog
+        open={autopilot !== null}
+        title={autopilot ? "恢复自动采集" : "暂停自动采集"}
+        description={
+          autopilot
+            ? "到期信源会在下一分钟重新按各自的间隔采集。暂停期间积压的到期信源会一起补上。"
+            : "定时任务不再抓取信源，之后可以手动采集一轮。处理、发布、推送和报告照常运行；外部上报（采集脚本）仍然接收。"
+        }
+        confirmLabel={autopilot ? "恢复" : "暂停"}
+        danger={!autopilot}
+        busy={pending === "autopilot"}
+        onClose={() => setAutopilot(null)}
+        onSubmit={async (reason) => (await run("PUT", "/api/admin/collection/autopilot", { enabled: autopilot, reason }, { label: "autopilot", success: autopilot ? "已恢复自动采集" : "已暂停自动采集" })) !== null}
+      />
+      <ReasonDialog
+        open={round}
+        title="立即采集一轮"
+        description={`现在到期的是 ${num(r.collection.due)} 个信源。它们会各抓一次（付费列表同样计费），抓到的新内容照常进入分析。无论自动采集是否暂停都可以手动跑。`}
+        confirmLabel="采集"
+        requireReason={false}
+        busy={pending === "round"}
+        onClose={() => setRound(false)}
+        onSubmit={async (reason) => (await run("POST", "/api/admin/collection/round", { reason }, { label: "round", success: "已排队，worker 正在抓取" })) !== null}
+      />
       <ReasonDialog
         open={requeue !== null}
         title={requeue ? "重新处理这一类失败" : "重新处理全部失败"}

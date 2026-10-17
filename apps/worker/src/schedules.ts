@@ -6,6 +6,7 @@ import { responder, serverModules, type Scheduled } from "@aihot/backend/modules
 import { sweepUnprocessed } from "@aihot/backend/jobs/content";
 import { translatePending } from "@aihot/backend/editorial/translate";
 import { adaptIntervals, scheduleDueSources } from "@aihot/backend/sources/collect";
+import { autoCollectEnabled } from "@aihot/backend/sources/autopilot";
 import { scheduleMpReconcile } from "@aihot/backend/sources/mp";
 import { dajialaConfigured } from "@aihot/backend/providers/dajiala";
 import { refreshSourceIcons } from "@aihot/backend/sources/icons";
@@ -21,6 +22,14 @@ import { backupConfigured, runBackup } from "@aihot/backend/operations/backup";
 import { sourceHealthWeekly } from "@aihot/backend/operations/reports";
 
 const collecting = process.env.COLLECT_ENABLED === "true";
+
+/**
+ * A collection schedule, held to the operator's switch (settings `collection.autopilot`, read at run
+ * time): paused, the cron still fires and records its run, but fetches nothing. Manual rounds and one
+ * source's "立即采集" do not go through here, so a paused site can still be fetched on demand.
+ */
+const onSchedule = <T>(run: () => Promise<T>) => async (): Promise<T | { paused: true }> =>
+  (await autoCollectEnabled()) ? run() : { paused: true };
 
 const ENGINE_SCHEDULES: Scheduled[] = [
   { name: "content.sweep", cron: "*/5 * * * *", run: sweepUnprocessed },
@@ -49,14 +58,14 @@ const ENGINE_SCHEDULES: Scheduled[] = [
   { name: "reports.source-health", cron: "0 9 * * 1", missed: "once", run: () => sourceHealthWeekly(), when: () => !responder() },
   ...(collecting
     ? [
-        { name: "sources.schedule", cron: "* * * * *", run: () => scheduleDueSources() },
-        { name: "sources.adapt-intervals", cron: "20 4 * * *", run: adaptIntervals },
+        { name: "sources.schedule", cron: "* * * * *", run: onSchedule(scheduleDueSources) },
+        { name: "sources.adapt-intervals", cron: "20 4 * * *", run: onSchedule(adaptIntervals) },
         // Icons are read from the sources' own sites, so they stop with collection.
-        { name: "sources.icons", cron: "40 4 * * *", missed: "once" as const, run: () => refreshSourceIcons() },
+        { name: "sources.icons", cron: "40 4 * * *", missed: "once" as const, run: onSchedule(refreshSourceIcons) },
       ]
     : []),
   // WeChat official accounts through Dajiala (paid), each once per its interval; only with its key.
-  ...(collecting && dajialaConfigured() ? [{ name: "sources.mp-reconcile", cron: "*/15 * * * *", run: () => scheduleMpReconcile() }] : []),
+  ...(collecting && dajialaConfigured() ? [{ name: "sources.mp-reconcile", cron: "*/15 * * * *", run: onSchedule(scheduleMpReconcile) }] : []),
 ];
 
 export async function registerSchedules(boss: PgBoss) {
