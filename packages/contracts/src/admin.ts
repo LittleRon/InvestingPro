@@ -321,13 +321,16 @@ export interface AdminNotifyTarget {
 
 export interface AdminBudget {
   service: string;
-  per_minute: number;
-  per_hour: number;
-  per_day: number;
+  /** 没设过上限时三项都是 null：这个服务目前不受限，用一次算一次。 */
+  per_minute: number | null;
+  per_hour: number | null;
+  per_day: number | null;
   note: string | null;
-  updated_at: Timestamp;
+  updated_at: Timestamp | null;
   used_day: number;
   used_hour: number;
+  /** budgets 表里有没有这一行。false 就是这个服务还没有上限，页面上要能给它设一个。 */
+  configured: boolean;
 }
 
 export interface AdminSettings {

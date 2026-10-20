@@ -51,28 +51,62 @@ function QrSlot({ slot, label, src }: { slot: "wechatQr" | "feishuQr"; label: st
 
 function BudgetRow({ b }: { b: AdminSettings["budgets"][number] }) {
   const { run, pending } = useAdminAction();
-  const [v, setV] = useState({ perMinute: b.per_minute, perHour: b.per_hour, perDay: b.per_day });
+  // 没设过上限的服务三项都是 null，输入框留空让它自己填。
+  const [v, setV] = useState({
+    perMinute: b.per_minute ?? null,
+    perHour: b.per_hour ?? null,
+    perDay: b.per_day ?? null,
+  });
   const [open, setOpen] = useState(false);
-  const changed = v.perMinute !== b.per_minute || v.perHour !== b.per_hour || v.perDay !== b.per_day;
+  const [removing, setRemoving] = useState(false);
+  const filled = v.perMinute !== null && v.perHour !== null && v.perDay !== null;
+  const changed = filled && (v.perMinute !== b.per_minute || v.perHour !== b.per_hour || v.perDay !== b.per_day);
   return (
     <tr className="border-b border-line/70 last:border-0">
-      <td className="px-3 py-2 font-mono text-[12.5px]">{b.service}</td>
+      <td className="px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-[12.5px]">{b.service}</span>
+          {!b.configured && <Badge tone="warn">未设上限 · 用一次算一次</Badge>}
+        </div>
+      </td>
       {(["perMinute", "perHour", "perDay"] as const).map((k) => (
         <td key={k} className="px-3 py-2">
-          <Input type="number" min={0} className="!w-24 !py-1 text-right" value={v[k]} onChange={(e) => setV({ ...v, [k]: Number(e.target.value) })} />
+          <Input
+            type="number"
+            min={0}
+            className="!w-24 !py-1 text-right"
+            value={v[k] ?? ""}
+            placeholder={b.configured ? undefined : "不限"}
+            onChange={(e) => setV({ ...v, [k]: e.target.value === "" ? null : Number(e.target.value) })}
+          />
         </td>
       ))}
       <td className="num px-3 py-2 text-right text-ink-3">{num(b.used_hour)} / {num(b.used_day)}</td>
       <td className="px-3 py-2 text-right">
-        <Button size="sm" tone="primary" disabled={!changed} onClick={() => setOpen(true)}>保存</Button>
+        <Button size="sm" tone="primary" disabled={!changed} onClick={() => setOpen(true)}>{b.configured ? "保存" : "设置上限"}</Button>
+        {b.configured && (
+          <Button size="sm" className="ml-1.5" disabled={!b.configured} onClick={() => setRemoving(true)}>撤掉</Button>
+        )}
         <ReasonDialog
           open={open}
-          title={`调整 ${b.service} 的请求上限`}
-          description={`上限是付费请求的熔断：超过后请求暂停并按窗口重试。填 0 表示立即停用这个服务。${ADMIN.budgetNote ?? ""}`}
+          title={`${b.configured ? "调整" : "设置"} ${b.service} 的请求上限`}
+          description={`上限是付费请求的熔断：超过后请求暂停并按窗口重试。填 0 表示立即停用这个服务。三个窗口要都填，漏一个就还是照旧。${ADMIN.budgetNote ?? ""}`}
           confirmLabel="保存"
           busy={pending === "budget"}
           onClose={() => setOpen(false)}
-          onSubmit={async (reason) => (await run("PUT", `/api/admin/budgets/${encodeURIComponent(b.service)}`, { ...v, reason }, { label: "budget", success: "上限已更新" })) !== null}
+          onSubmit={async (reason) => (await run("PUT", `/api/admin/budgets/${encodeURIComponent(b.service)}`, {
+            perMinute: v.perMinute!, perHour: v.perHour!, perDay: v.perDay!, reason,
+          }, { label: "budget", success: b.configured ? "上限已更新" : "上限已设置" })) !== null}
+        />
+        <ReasonDialog
+          open={removing}
+          title={`撤掉 ${b.service} 的上限`}
+          description="撤掉之后这个服务不再受预算约束，有多少请求就发多少。想重新限额就再设一次。"
+          confirmLabel="撤掉上限"
+          danger
+          busy={pending === "budget-remove"}
+          onClose={() => setRemoving(false)}
+          onSubmit={async (reason) => (await run("DELETE", `/api/admin/budgets/${encodeURIComponent(b.service)}`, { reason }, { label: "budget-remove", success: "上限已撤掉" })) !== null}
         />
       </td>
     </tr>

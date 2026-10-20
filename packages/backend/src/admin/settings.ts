@@ -9,6 +9,7 @@ import { config } from "../config.ts";
 import { sql } from "../db.ts";
 import { sha256 } from "../lib/ids.ts";
 import { loadContact, type ContactSettings } from "../site/contact.ts";
+import { MODELS } from "../providers/llm.ts";
 import { audit } from "../audit.ts";
 
 const MAX_QR_BYTES = 2 * 1024 * 1024;
@@ -57,12 +58,50 @@ export async function setTargetEnabled(key: string, enabled: boolean, reason: st
   return { ...after, pushEnabledHere: config.feishuContentPushEnabled };
 }
 
+/**
+ * 会花钱的外部服务。默认模型与站上配的每个具名预设各有自己的 service，
+ * 加上读取网页、向量和抓取那几家。没有上限的服务也要列出来，否则页面上根本看不见它。
+ */
+export function budgetServices(): string[] {
+  const names = new Set<string>(Object.values(MODELS).map((m) => m.service));
+  for (const s of ["embedding", "jina", "dajiala", "socialdata"]) names.add(s);
+  return [...names].sort();
+}
+
+async function usageOf(service: string): Promise<{ used_day: number; used_hour: number }> {
+  const [row] = await sql<{ used_day: number; used_hour: number }[]>`
+    SELECT
+      count(*) FILTER (WHERE started_at > now() - interval '1 day')::int AS used_day,
+      count(*) FILTER (WHERE started_at > now() - interval '1 hour')::int AS used_hour
+    FROM receipt_attempts WHERE service = ${service} AND origin = 'live' AND started_at > now() - interval '1 day'`;
+  return { used_day: row?.used_day ?? 0, used_hour: row?.used_hour ?? 0 };
+}
+
 export async function listBudgets(): Promise<BeforeJson<AdminBudget>[]> {
-  return sql<BeforeJson<AdminBudget>[]>`
+  const rows = await sql<BeforeJson<AdminBudget>[]>`
     SELECT b.service, b.per_minute, b.per_hour, b.per_day, b.note, b.updated_at,
+           true AS configured,
            (SELECT count(*)::int FROM receipt_attempts a WHERE a.service = b.service AND a.origin = 'live' AND a.started_at > now() - interval '1 day') AS used_day,
            (SELECT count(*)::int FROM receipt_attempts a WHERE a.service = b.service AND a.origin = 'live' AND a.started_at > now() - interval '1 hour') AS used_hour
     FROM budgets b ORDER BY b.service`;
+  const seen = new Set(rows.map((r) => r.service));
+  // 没设过上限的服务照样列出来：它们在花钱，却在表格里缺一行，最容易漏掉。
+  const missing: BeforeJson<AdminBudget>[] = [];
+  for (const service of budgetServices()) {
+    if (seen.has(service)) continue;
+    missing.push({ service, per_minute: null, per_hour: null, per_day: null, note: null, updated_at: null, configured: false, ...(await usageOf(service)) });
+  }
+  return [...rows.filter((r) => r.configured), ...missing].sort((a, b) => (a.service < b.service ? -1 : 1));
+}
+
+/** 撤掉上限，让这个服务重新不受限。改回限额用它旁边的保存按钮。 */
+export async function deleteBudget(service: string, reason: string, actor: string) {
+  if (!reason?.trim()) throw new Error("reason is required");
+  const [before] = await sql<{ per_minute: number; per_hour: number; per_day: number }[]>`
+    DELETE FROM budgets WHERE service = ${service} RETURNING per_minute, per_hour, per_day`;
+  if (!before) throw new Error("这个服务本来就没有上限");
+  await audit(actor, "budget.delete", `budget:${service}`, reason, before, null);
+  return { service };
 }
 
 export async function updateBudget(service: string, input: { perMinute: number; perHour: number; perDay: number; reason: string }, actor: string) {

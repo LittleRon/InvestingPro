@@ -1,0 +1,245 @@
+// 经济周期的算法：把一条序列拆出长波、中周期、短周期三个频带。
+//
+// 用的是 Christiano-Fitzgerald 带通滤波（Christiano & Fitzgerald, 2003）的对称全样本版本：
+// 先给理想带通滤波器的权重，再把权重去均值（截断后的权重和不再是 0，不去均值会漏进常数项），
+// 拿它和序列卷积。两个频率边界按数据的频率换算成期数：康德拉季耶夫长波 50–60 年，
+// 朱格拉中周期 7–11 年，基钦短周期 3–5 年。
+//
+// 序列进来先取对数、再去掉线性趋势，之后滤波得到的数乘 100，读作「相对趋势的偏离百分之几」。
+// 取对数让不同量级的序列可以互相比较，去趋势是因为权重去均值只消除常数、不消除趋势。
+//
+// 长波有它改不掉的限制：五十到六十年一轮，而公开的长序列本身也不过六七十年，样本两端
+// 没有足够的邻点。滤波器在两端只能用得到的一半窗口，所以末端的位置是估计出来的，
+// 新数据进来会被修正。这里不掩饰：末端若干点标成 provisional，页面上按虚线画并写明。
+export type Frequency = "D" | "W" | "M" | "Q" | "A";
+
+export interface Point {
+  /** YYYY-MM-DD。 */
+  at: string;
+  value: number;
+}
+
+const PER_YEAR: Record<Frequency, number> = { D: 260, W: 52, M: 12, Q: 4, A: 1 };
+
+/** 五十到六十年一轮、七到十一年一轮、三到五年一轮：频带按年给出，再换成期数。 */
+export function bands(cycle: { lowYears: number; highYears: number }, frequency: Frequency): { low: number; high: number } {
+  const per = PER_YEAR[frequency];
+  return { low: Math.round(cycle.lowYears * per), high: Math.round(cycle.highYears * per) };
+}
+
+/** 一期一期地取对数，跳过 0 和负数（价格与产出都是正的，空值来自数据源本身的缺失）。 */
+export function toLogs(values: number[]): number[] {
+  return values.map((v) => (v > 0 ? Math.log(v) : NaN));
+}
+
+/** 最小二乘去掉线性趋势，返回去掉趋势后的残差。缺值的点不参与拟合，也不参与残差。 */
+export function removeLinearTrend(values: number[]): number[] {
+  const idx: number[] = [];
+  const ys: number[] = [];
+  values.forEach((v, i) => {
+    if (Number.isFinite(v)) { idx.push(i); ys.push(v); }
+  });
+  if (idx.length < 2) return values.map(() => NaN);
+  const n = idx.length;
+  const meanX = idx.reduce((a, b) => a + b, 0) / n;
+  const meanY = ys.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  for (let k = 0; k < n; k++) { sxy += (idx[k]! - meanX) * (ys[k]! - meanY); sxx += (idx[k]! - meanX) ** 2; }
+  const slope = sxx === 0 ? 0 : sxy / sxx;
+  return values.map((v, i) => (Number.isFinite(v) ? v - (meanY + slope * (i - meanX)) : NaN));
+}
+
+/**
+ * 带通滤波。`low`/`high` 是保留的周期区间（期数），比如年度序列的康波是 50 到 60。
+ * 返回与输入等长的数组；两端窗口不够的点仍然算，但会被 `provisionalCount` 标出来。
+ */
+export function cfFilter(
+  values: number[],
+  low: number,
+  high: number,
+): { filtered: number[]; provisionalCount: number; shortSample: boolean } {
+  const n = values.length;
+  // 理想带通的权重。w = 2π / 周期：周期越长频率越低，所以高频端对应短周期。
+  const wHigh = (2 * Math.PI) / low;
+  const wLow = (2 * Math.PI) / high;
+  // 窗口取到两个最长周期那么宽：窄频带（比如 50–60 年这一带）的权重在时域上衰减得慢，
+  // 截得太短会把幅度削掉一半。窗口越宽，末端估计的部分也越长——这两件事是一回事。
+  const K = Math.min(2 * high, Math.max(1, Math.floor((n - 1) / 2)));
+  const b: number[] = [];
+  for (let j = 0; j <= K; j++) {
+    b[j] = j === 0 ? (wHigh - wLow) / Math.PI : (Math.sin(j * wHigh) - Math.sin(j * wLow)) / (Math.PI * j);
+  }
+  // 权重去均值：无限长的权重和为 0（理想带通在零频的增益是 0），截断以后不再是。
+  let sum = b[0]!;
+  for (let j = 1; j <= K; j++) sum += 2 * b[j]!;
+  const mean = sum / (2 * K + 1);
+  const weight = (j: number) => b[Math.abs(j)]! - mean;
+  const filtered: number[] = [];
+  for (let t = 0; t < n; t++) {
+    let acc = 0;
+    for (let j = -K; j <= K; j++) {
+      const i = t - j;
+      if (i < 0 || i >= n) continue;
+      const v = values[i]!;
+      if (!Number.isFinite(v)) continue;
+      acc += weight(j) * v;
+    }
+    filtered.push(acc);
+  }
+  // 序列比一个完整长波还短时，滤波器拿不到足够的邻点，分离出来的长波不可靠。
+  const shortSample = n < 2 * high + 1;
+  return { filtered, provisionalCount: Math.min(K, n), shortSample };
+}
+
+export interface CycleSeries {
+  cycle: string;
+  name: string;
+  short: string;
+  points: Point[];
+  /** 末端这些点是估计值（滤波窗口只有一半），会随新数据修正。 */
+  provisionalFrom: string | null;
+  /** 序列长度不足以完整分离这个频带。 */
+  shortSample: boolean;
+  latest: number | null;
+  /** 末端所处的相位：在上升段还是下降段，以及离最近一次拐点多久。 */
+  phase: "rising" | "falling" | null;
+}
+
+/**
+ * 一条原始序列的周期成分。取对数、去趋势、带通滤波、乘 100 变成「偏离百分之几」。
+ * 末端 K 个点标 provisional；全序列过短时 shortSample 为真。
+ */
+export function cycleOf(
+  raw: Point[],
+  frequency: Frequency,
+  cycle: { key: string; name: string; short: string; lowYears: number; highYears: number },
+): CycleSeries {
+  const values = raw.map((p) => p.value);
+  const { low, high } = bands(cycle, frequency);
+  const logs = toLogs(values);
+  const detrended = removeLinearTrend(logs);
+  const { filtered, provisionalCount, shortSample } = cfFilter(detrended, low, high);
+  const points: Point[] = filtered.map((v, i) => ({ at: raw[i]!.at, value: v * 100 }));
+  const provisionalFrom = provisionalCount > 0 && provisionalCount < points.length ? points[points.length - provisionalCount]!.at : null;
+  return {
+    cycle: cycle.key,
+    name: cycle.name,
+    short: cycle.short,
+    points,
+    provisionalFrom,
+    shortSample,
+    latest: points.length ? points[points.length - 1]!.value : null,
+    phase: phaseOf(points),
+  };
+}
+
+/** 末端在上升还是下降：拿末端一年的点和它之前的点比，差太小就当作说不准。 */
+function phaseOf(points: Point[]): "rising" | "falling" | null {
+  if (points.length < 2) return null;
+  const last = points[points.length - 1]!;
+  const prev = points[points.length - 2]!;
+  const diff = last.value - prev.value;
+  if (Math.abs(diff) < 0.05) return null;
+  return diff > 0 ? "rising" : "falling";
+}
+
+/** 同比：和（每期数）期之前比，返回百分数。期数不够或基期为 0 或缺失时该点为空。 */
+export function yoyOf(points: Point[], frequency: Frequency): Point[] {
+  const step = { D: 260, W: 52, M: 12, Q: 4, A: 1 }[frequency];
+  return points.map((p, i) => {
+    const base = points[i - step];
+    if (!base || !base.value || !Number.isFinite(base.value)) return { at: p.at, value: NaN };
+    return { at: p.at, value: ((p.value - base.value) / base.value) * 100 };
+  }).filter((p) => Number.isFinite(p.value));
+}
+
+/** 按时间范围裁剪。from、to 是 YYYY-MM-DD，闭区间。 */
+export function sliceRange(points: Point[], from?: string | null, to?: string | null): Point[] {
+  return points.filter((p) => (!from || p.at >= from) && (!to || p.at <= to));
+}
+
+/**
+ * 降到最多 maxPoints 个点，等距取，首尾一定保留。日频序列几十年会有上万点，
+ * 画到屏幕上既没必要也传不动。
+ */
+export function downsample(points: Point[], maxPoints: number): Point[] {
+  if (points.length <= maxPoints || maxPoints < 2) return points;
+  const out: Point[] = [points[0]!];
+  const step = (points.length - 1) / (maxPoints - 1);
+  for (let i = 1; i < maxPoints - 1; i++) out.push(points[Math.round(i * step)]!);
+  out.push(points[points.length - 1]!);
+  return out;
+}
+
+/** 序列最后一个值，以及它对应的日期（页面用它写「截至」）。 */
+export function latestOf(points: Point[]): { value: number; at: string } | null {
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i]!;
+    if (Number.isFinite(p.value)) return { value: p.value, at: p.at };
+  }
+  return null;
+}
+
+/** 一个图块里几条序列共用纵轴时的范围，上下留一点余量。 */
+export function extentOf(series: Point[][]): { min: number; max: number } {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const points of series) {
+    for (const p of points) {
+      if (!Number.isFinite(p.value)) continue;
+      if (p.value < min) min = p.value;
+      if (p.value > max) max = p.value;
+    }
+  }
+  if (min === Infinity) return { min: 0, max: 1 };
+  const pad = (max - min) * 0.08 || Math.abs(max) * 0.08 || 1;
+  return { min: min - pad, max: max + pad };
+}
+
+/**
+ * 按已知的周期谷底锚定相位：相邻谷底之间的实测间隔当作这一段的长度，最后一段用前面几段的
+ * 平均长度外推。数据不够长时（康波要六百多个月，而公开序列只有两百来个月）带通滤波提不出来，
+ * 只能用这种办法——代价是最后那段是假设外推，不是算出来的。
+ */
+export function anchoredCycle(at: string[], troughs: string[], nominalMonths: number): number[] {
+  const index = (m: string) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
+  const idx = at.map(index);
+  const troughIdx = troughs.map(index);
+  const lengths: number[] = [];
+  for (let i = 1; i < troughIdx.length; i++) lengths.push(troughIdx[i]! - troughIdx[i - 1]!);
+  const avg = lengths.length ? lengths.reduce((a, b) => a + b, 0) / lengths.length : nominalMonths;
+  return idx.map((t) => {
+    let seg = 0;
+    for (let i = 1; i < troughIdx.length; i++) if (t >= troughIdx[i]!) seg = i;
+    const start = troughIdx[seg]!;
+    const length = seg < troughIdx.length - 1 ? lengths[seg]! : avg;
+    // 谷底取 -1：相位从谷底起算半个周期。
+    return -Math.cos((2 * Math.PI * (t - start)) / length);
+  });
+}
+
+/** 三条周期曲线按时间对齐后相加，就是叠加态：三条各自站什么位置，合起来又是什么位置。 */
+export function overlayOf(cycles: CycleSeries[]): { points: Point[]; provisionalFrom: string | null; shortSample: boolean } {
+  const byDate = new Map<string, number[]>();
+  for (const c of cycles) {
+    for (const p of c.points) {
+      if (!Number.isFinite(p.value)) continue;
+      const list = byDate.get(p.at) ?? [];
+      list.push(p.value);
+      byDate.set(p.at, list);
+    }
+  }
+  const dates = [...byDate.keys()].sort();
+  // 只在三条都到齐的点上相加，缺一条就不合，免得叠加态看起来像某一条单独在动。
+  const need = cycles.length;
+  const points: Point[] = [];
+  let provisionalFrom: string | null = null;
+  for (const at of dates) {
+    const values = byDate.get(at)!;
+    if (values.length < need) continue;
+    points.push({ at, value: values.reduce((a, b) => a + b, 0) / values.length });
+  }
+  for (const c of cycles) if (c.provisionalFrom && (!provisionalFrom || c.provisionalFrom < provisionalFrom)) provisionalFrom = c.provisionalFrom;
+  return { points, provisionalFrom, shortSample: cycles.some((c) => c.shortSample) };
+}
