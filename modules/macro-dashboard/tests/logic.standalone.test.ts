@@ -1,7 +1,7 @@
 // 周期算法的测试（不需要数据库）。重点是滤波器按频带分开：通带里的周期留下，带外的压掉。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cfFilter, cycleOf, downsample, overlayOf, removeLinearTrend, sliceRange, yoyOf, type Point } from "../logic.ts";
+import { blendOf, cfFilter, cycleOf, diffOf, downsample, overlayOf, removeLinearTrend, sliceRange, yoyOf, type Point } from "../logic.ts";
 
 const CYCLES = {
   kondratiev: { key: "kondratiev", name: "康德拉季耶夫长波", short: "长波", lowYears: 50, highYears: 60 },
@@ -108,18 +108,57 @@ test("降采样保住首尾，且不超过上限", () => {
   assert.equal(downsample(points.slice(0, 10), 50).length, 10);
 });
 
-test("三条周期合起来的叠加态，缺一条就不合", () => {
-  const shared = ["2020-12-31", "2021-12-31"];
-  const make = (values: number[]) => shared.map((at, i) => ({ at, value: values[i]! }));
-  const one = { cycle: "kondratiev", name: "长波", short: "长波", points: make([1, 2]), provisionalFrom: null, shortSample: false, latest: 2, phase: "rising" as const };
-  const two = { ...one, cycle: "juglar", points: make([3, 4]) };
-  const three = { ...one, cycle: "kitchin", points: make([5, 6]) };
-  const overlay = overlayOf([one, two, three]);
-  assert.deepEqual(overlay.points.map((p) => p.value), [3, 4]);
+// ===== 叠加态 =====
 
-  // 第二条在第二个时点缺一条：那一点不进叠加态。
-  const partial = { ...two, points: make([3, NaN]) };
-  assert.deepEqual(overlayOf([one, partial, three]).points.map((p) => p.value), [3]);
+const atMonth = (m: number) => `${Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, "0")}-01`;
+const BASE = 2020 * 12 + 11; // 2020-12
+const asCycle = (points: Point[], key: string) =>
+  ({ cycle: key, name: key, short: key, points, provisionalFrom: null, shortSample: false, latest: null, phase: null });
+
+test("年度与季度先补成月度，叠加才不会被低频的那条拖稀", () => {
+  // 老做法只在三条日期相交的点上相加：年度两条 + 月度一条，只剩 2 个年度点。
+  const yearly = [0, 12].map((k) => ({ at: atMonth(BASE + k), value: 1 + k / 12 }));
+  const monthly = Array.from({ length: 13 }, (_, k) => ({ at: atMonth(BASE + k), value: 3 + k / 6 }));
+  const third = Array.from({ length: 13 }, (_, k) => ({ at: atMonth(BASE + k), value: -1 + k / 6 }));
+  const overlay = overlayOf([asCycle(yearly, "kondratiev"), asCycle(monthly, "juglar"), asCycle(third, "kitchin")]);
+  assert.equal(overlay.points.length, 13, "叠加落在月度网格上，不是只剩两个年度交点");
+  const values = overlay.points.map((p) => p.value);
+  for (let i = 1; i < values.length; i++) assert.ok(values[i]! > values[i - 1]!, "三条同向时叠加也同向");
+  // 三条形状一致，标准化后叠加首尾对称。
+  assert.ok(Math.abs(values[0]! + values[values.length - 1]!) < 1e-9);
+});
+
+test("叠加前先标准化，幅度大的那条不再盖住其余两条", () => {
+  const small = Array.from({ length: 13 }, (_, k) => ({ at: atMonth(BASE + k), value: k / 12 - 0.5 }));
+  // 同一条形状，幅度放大一万倍。
+  const big = small.map((p) => ({ at: p.at, value: p.value * 10000 }));
+  const merged = overlayOf([asCycle(small, "a"), asCycle(big, "b")]).points.map((p) => p.value);
+  // 同形状的两条叠加后仍应是这个形状：首尾对称、单调上升。
+  assert.ok(Math.abs(merged[0]! + merged[merged.length - 1]!) < 1e-9);
+  for (let i = 1; i < merged.length; i++) assert.ok(merged[i]! > merged[i - 1]!);
+  // 关键：量级仍是标准化后的个位数。直接相加会被大那条主导，差一万倍。
+  assert.ok(Math.abs(merged[merged.length - 1]!) < 2, "标准化之后幅度不再主导");
+  const direct = small.map((p, i) => (p.value + big[i]!.value) / 2);
+  assert.ok(Math.abs(direct[direct.length - 1]!) > 1000, "（对照）直接相加会被放大那条吃掉");
+});
+
+test("权重决定谁说了算：反过来给权重，叠加就跟着反过来", () => {
+  const up = Array.from({ length: 13 }, (_, k) => ({ at: atMonth(BASE + k), value: k / 12 }));
+  const down = up.map((p) => ({ at: p.at, value: 1 - p.value }));
+  const balanced = overlayOf([asCycle(up, "up"), asCycle(down, "down")]);
+  // 等权时两条正好抵消。
+  for (const p of balanced.points) assert.ok(Math.abs(p.value) < 1e-9, "等权时两条抵消");
+  const tilted = overlayOf([asCycle(up, "up"), asCycle(down, "down")], [3, 1]).points.map((p) => p.value);
+  assert.ok(tilted[0]! < 0 && tilted[tilted.length - 1]! > 0, "偏向上升那条时，叠加跟着上升");
+});
+
+test("缺一条的那些月份不进叠加态", () => {
+  const full = Array.from({ length: 13 }, (_, k) => ({ at: atMonth(BASE + k), value: k / 12 }));
+  // 第二条只有前半年。
+  const partial = full.slice(0, 6);
+  const overlay = overlayOf([asCycle(full, "a"), asCycle(partial, "b")]);
+  assert.equal(overlay.points.length, 6, "只在两条都有的月份上合成");
+  assert.equal(overlay.points[0]!.at, atMonth(BASE));
 });
 
 test("一条完整序列能算出三个频带，末端标成估计", () => {
@@ -139,4 +178,71 @@ test("一条完整序列能算出三个频带，末端标成估计", () => {
   // 三个频带分开算，结果不该一样。
   assert.notDeepEqual(long.points.map((p) => p.value.toFixed(4)), mid.points.map((p) => p.value.toFixed(4)));
   assert.notDeepEqual(mid.points.map((p) => p.value.toFixed(4)), short.points.map((p) => p.value.toFixed(4)));
+});
+
+// ===== 派生剪刀差 =====
+
+test("剪刀差逐月相减，缺一侧的月份不出点", () => {
+  const left: Point[] = [
+    { at: "2026-01-01", value: 3.2 },
+    { at: "2026-02-01", value: 4.0 },
+    { at: "2026-03-01", value: 4.5 },
+  ];
+  const right: Point[] = [
+    { at: "2026-01-01", value: 7.2 },
+    // 二月缺
+    { at: "2026-03-01", value: 7.5 },
+  ];
+  assert.deepEqual(diffOf(left, right), [
+    { at: "2026-01-01", value: 3.2 - 7.2 },
+    { at: "2026-03-01", value: 4.5 - 7.5 },
+  ]);
+});
+
+test("剪刀差按月份对齐，两侧日期写法不同也不错位", () => {
+  const left = [{ at: "2026-05-01", value: 5.0 }, { at: "2026-01-01", value: 1.0 }];
+  // 右侧写在当月 3 号，仍是同一个月。
+  const right = [{ at: "2026-01-03", value: 2.0 }, { at: "2026-05-03", value: 3.0 }];
+  assert.deepEqual(diffOf(left, right), [
+    { at: "2026-01-01", value: -1.0 },
+    { at: "2026-05-01", value: 2.0 },
+  ]);
+});
+
+test("一侧为空就没有点，不拿 0 顶上", () => {
+  const left = [{ at: "2026-01-01", value: 1.0 }];
+  assert.deepEqual(diffOf(left, []), []);
+  assert.deepEqual(diffOf([], left), []);
+});
+
+// ===== 合成指数 =====
+
+test("合成指数把量纲不同的几条拼成一条，只在共同月份出点", () => {
+  // PMI 是 50 上下的水平值，PPI、M1 是个位数的同比：直接相加没有意义。
+  const pmi = Array.from({ length: 6 }, (_, k) => ({ at: atMonth(BASE + k), value: 49 + k * 0.2 }));
+  const ppi = Array.from({ length: 6 }, (_, k) => ({ at: atMonth(BASE + k), value: -1 + k * 0.5 }));
+  const m1 = ppi.slice(0, 4); // 少两个月
+  const out = blendOf([{ points: pmi, weight: 1 }, { points: ppi, weight: 1 }, { points: m1, weight: 1 }]);
+  assert.equal(out.length, 4, "只出三条都有的月份");
+  assert.equal(out[0]!.at, atMonth(BASE));
+  // 三条都单调上升，合成也该单调上升。
+  for (let i = 1; i < out.length; i++) assert.ok(out[i]!.value > out[i - 1]!.value);
+});
+
+test("合成时每条先标准化，量纲差一万倍也不互相盖掉", () => {
+  const shape = Array.from({ length: 6 }, (_, k) => ({ at: atMonth(BASE + k), value: k / 5 - 0.5 }));
+  const big = shape.map((p) => ({ at: p.at, value: p.value * 10000 }));
+  const out = blendOf([{ points: shape, weight: 1 }, { points: big, weight: 1 }]);
+  // 两条形状相同，合成后仍应是这个形状，且量级保持标准化后的个位数。
+  for (let i = 1; i < out.length; i++) assert.ok(out[i]!.value > out[i - 1]!.value);
+  assert.ok(Math.abs(out[out.length - 1]!.value) < 2, "没有被放大那条主导");
+});
+
+test("权重决定谁在合成里说了算", () => {
+  const up = Array.from({ length: 6 }, (_, k) => ({ at: atMonth(BASE + k), value: k / 5 }));
+  const down = up.map((p) => ({ at: p.at, value: 1 - p.value }));
+  const equal = blendOf([{ points: up, weight: 1 }, { points: down, weight: 1 }]);
+  for (const p of equal) assert.ok(Math.abs(p.value) < 1e-9, "等权时两条抵消");
+  const tilted = blendOf([{ points: up, weight: 3 }, { points: down, weight: 1 }]);
+  assert.ok(tilted[0]!.value < 0 && tilted[tilted.length - 1]!.value > 0, "偏向上升那条时跟着上升");
 });

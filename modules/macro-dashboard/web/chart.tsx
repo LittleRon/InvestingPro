@@ -1,5 +1,10 @@
 // 仪表盘的折线图。手写 SVG，不引图表库：这些图只用来看走势和位置，
 // 不需要缩放拖拽那一套。颜色交给 CSS 类（stroke 用 currentColor），深浅色外观都跟着变。
+//
+// 一条线可以被高亮（粗、不透明），其余的压成陪衬（细、半透明）；鼠标移到图上会读出
+// 那一刻每条线的值。哪条线是哪条由调用方决定——叠加那条要高亮，它底下的三条要压下去，
+// 否则四根线一样重，看的人分不出主次。
+import { useState } from "react";
 import type { Point } from "../logic.ts";
 
 export interface Line {
@@ -10,10 +15,17 @@ export interface Line {
   points: Point[];
   /** 从这一天起末端是估计值，按虚线画。 */
   dashedFrom?: string | null;
+  /** 线宽，默认 1.6。被高亮的那条给 2.6 左右才压得住其余的。 */
+  width?: number;
+  /** 压成陪衬：细一点、半透明，让被高亮的那条站出来。 */
+  muted?: boolean;
 }
 
 const W = 820;
 const PAD = { left: 46, right: 10, top: 12, bottom: 24 };
+/** 读数的提示框：宽固定，高按行数算。 */
+const TIP_W = 168;
+const TIP_ROW = 15;
 
 /** 值的写法：价格类两位小数，大额用千分位，百分比自己带符号。 */
 export function fmtValue(value: number): string {
@@ -81,6 +93,8 @@ export function LineChart({
   zero = false,
   emptyText = "还没有数据",
 }: { lines: Line[]; height?: number; zero?: boolean; emptyText?: string }): React.ReactElement {
+  // 鼠标落在哪个时点上；null 是不悬停。悬停只影响读数，不改变画什么。
+  const [hoverAt, setHoverAt] = useState<string | null>(null);
   const innerW = W - PAD.left - PAD.right;
   const innerH = height - PAD.top - PAD.bottom;
   const range = timeRange(lines);
@@ -97,8 +111,35 @@ export function LineChart({
   const dashed = (line: Line) => (line.dashedFrom ? solid(line).filter((p) => p.at >= line.dashedFrom!) : []);
   const path = (points: Point[]) => points.map((p, i) => `${i === 0 ? "M" : "L"}${x(p.at).toFixed(1)} ${y(p.value).toFixed(1)}`).join(" ");
 
+  // 所有线上出现过的日期，排序后用来找离鼠标最近的那个时点。
+  const dates = [...new Set(lines.flatMap((l) => solid(l).map((p) => p.at)))].sort();
+  const pick = (clientX: number, box: DOMRect) => {
+    // 页面上的宽度是缩放过的：先换回 viewBox 的坐标，再扣掉左边的轴。
+    const svgX = ((clientX - box.left) / (box.width || 1)) * W;
+    const t = range.from + ((svgX - PAD.left) / (innerW || 1)) * (range.to - range.from);
+    let best: string | null = null;
+    let bestGap = Infinity;
+    for (const at of dates) {
+      const gap = Math.abs(Date.parse(at) - t);
+      if (gap < bestGap) { bestGap = gap; best = at; }
+    }
+    return best;
+  };
+
+  // 提示框贴着读数那一列，右边放不下就翻到左边。
+  const tipX = hoverAt ? (x(hoverAt) + 12 + TIP_W > W - PAD.right ? x(hoverAt) - 12 - TIP_W : x(hoverAt) + 12) : 0;
+  const tipRows = hoverAt ? lines.map((l) => ({ line: l, point: solid(l).find((p) => p.at === hoverAt) })) : [];
+  const tipH = 22 + tipRows.length * TIP_ROW + 6;
+
   return (
-    <svg viewBox={`0 0 ${W} ${height}`} className="w-full" role="img" aria-label={lines.map((l) => l.name).join("、")}>
+    <svg
+      viewBox={`0 0 ${W} ${height}`}
+      className="w-full touch-none"
+      role="img"
+      aria-label={lines.map((l) => l.name).join("、")}
+      onMouseMove={(e) => setHoverAt(pick(e.clientX, e.currentTarget.getBoundingClientRect()))}
+      onMouseLeave={() => setHoverAt(null)}
+    >
       {ticks(min, max).map((t) => (
         <g key={t}>
           <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="currentColor" className="text-line-soft" strokeWidth={1} />
@@ -114,10 +155,11 @@ export function LineChart({
         const all = solid(line);
         const later = dashed(line);
         const earlier = later.length ? all.slice(0, all.length - later.length + 1) : all;
+        const width = line.muted ? Math.min(line.width ?? 1.6, 1.2) : (line.width ?? 1.6);
         return (
-          <g key={line.key} className={line.tone}>
-            <path d={path(later.length ? earlier : all)} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" />
-            {later.length > 1 && <path d={path(later)} fill="none" stroke="currentColor" strokeWidth={1.6} strokeDasharray="4 3" strokeLinejoin="round" />}
+          <g key={line.key} className={line.tone} opacity={line.muted ? 0.5 : 1}>
+            <path d={path(later.length ? earlier : all)} fill="none" stroke="currentColor" strokeWidth={width} strokeLinejoin="round" />
+            {later.length > 1 && <path d={path(later)} fill="none" stroke="currentColor" strokeWidth={width} strokeDasharray="4 3" strokeLinejoin="round" />}
           </g>
         );
       })}
@@ -126,6 +168,64 @@ export function LineChart({
           {d.label}
         </text>
       ))}
+      {hoverAt && (
+        <g pointerEvents="none">
+          <line x1={x(hoverAt)} x2={x(hoverAt)} y1={PAD.top} y2={height - PAD.bottom} stroke="currentColor" className="text-ink-3" strokeWidth={0.8} strokeDasharray="2 2" />
+          {tipRows.map(({ line, point }) => (point
+            ? <circle key={line.key} cx={x(hoverAt)} cy={y(point.value)} r={line.muted ? 2.2 : 3} fill="currentColor" className={line.tone} />
+            : null))}
+          <rect x={tipX} y={PAD.top + 2} width={TIP_W} height={tipH} rx={6} fill="var(--color-background-primary)" stroke="var(--color-border-secondary)" strokeWidth={0.6} />
+          <text x={tipX + 8} y={PAD.top + 17} className="fill-ink-2 text-[10.5px]">{hoverAt}</text>
+          {tipRows.map(({ line, point }, i) => (
+            <g key={line.key}>
+              <rect x={tipX + 8} y={PAD.top + 24 + i * TIP_ROW} width={7} height={2.5} rx={1.2} fill="currentColor" className={line.tone} />
+              <text x={tipX + 20} y={PAD.top + 28 + i * TIP_ROW} className="fill-ink-3 text-[10px]">{line.name}</text>
+              <text x={tipX + TIP_W - 8} y={PAD.top + 28 + i * TIP_ROW} textAnchor="end" className="fill-ink-2 text-[10.5px]">
+                {point ? fmtValue(point.value) : "—"}
+              </text>
+            </g>
+          ))}
+        </g>
+      )}
     </svg>
+  );
+}
+
+/**
+ * 图例：点一下把那条线收起来或放出来（收起的线不画，也不参与纵轴范围）。
+ * `note` 给每条线补一句状态，比如「上升」「末端为估计」。
+ */
+export function LineLegend({
+  lines,
+  hidden,
+  onToggle,
+  note,
+}: {
+  lines: Line[];
+  hidden: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+  note?: (line: Line) => string | null;
+}): React.ReactElement {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1 text-[11.5px]">
+      {lines.map((l) => {
+        const off = hidden.has(l.key);
+        const extra = note?.(l) ?? null;
+        return (
+          <button
+            key={l.key}
+            type="button"
+            onClick={() => onToggle(l.key)}
+            aria-pressed={!off}
+            title={off ? `显示「${l.name}」` : `隐藏「${l.name}」`}
+            className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 transition-colors ${off ? "opacity-45" : "hover:bg-bg-sunk"}`}
+          >
+            <span className={`h-1.5 w-3 rounded-full bg-current ${l.tone} ${off ? "opacity-50" : ""}`} />
+            <span className={off ? "text-ink-4 line-through" : "text-ink-3"}>{l.name}</span>
+            {extra && !off && <span className="text-[10.5px] text-ink-4">{extra}</span>}
+          </button>
+        );
+      })}
+    </div>
   );
 }

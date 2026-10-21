@@ -7,7 +7,7 @@
 - `site/`：本站身份与品牌——站名文案（`site.ts`）、模型（`models.ts`）、品牌（`brand/`）、条款页（`pages/`）、根目录文件（`public/`）、更新日志（`changelog.json`）、启用的模块（`modules/`）
 - `industry/`：投资行业包——分类标签（`taxonomy.ts`）、主题（`topics.json`）、信源（`sources.json`）、提示词（`prompts/`）、门槛（`selection.ts`）、金标示例（`*.example.jsonl`）
 - `modules/invest-signals/`：投资专属模块——`/signals` 信号置信度榜与 `/trends` 行业趋势，见模块内注释与 `docs/architecture.md` 的“模块”
-- `modules/macro-dashboard/`：宏观仪表盘——`/dashboard` 五块图与 `/dashboard/report` 每日 PEST 分析。指标清单在 `indicators.ts`（加指标只改这里），周期滤波在 `logic.ts`（纯函数，有单测），采集在 `collect/`（FRED、世界银行、第三方行情），报告在 `report.ts` 与 `prompts/pest*.md`
+- `modules/macro-dashboard/`：宏观仪表盘——`/dashboard` 六块图（周期、货币与剪刀差、市场与基金、原油、CPI/PPI、大宗商品）与 `/dashboard/report` 每日 PEST 分析。指标清单在 `indicators.ts`（加指标只改这里），周期滤波与派生序列的算法在 `logic.ts`（纯函数，有单测），采集在 `collect/`（FRED、世界银行、东方财富、中证、第三方行情；`derived` 不是外部来源，由本地已入库的两条序列相减得到），报告在 `report.ts` 与 `prompts/pest*.md`
 - `scripts/nameplates-from-assets.ts`、`scripts/make-icons.ts`：本站的品牌生成脚本（报头字、图标）
 
 还带着上游名字、但故意没改的地方（改了就失去与上游引擎合并的能力，要改就一次性整体改）：包名作用域 `@aihot/*`、环境变量 `AIHOT_DATA_DIR`/`AIHOT_CREDENTIALS_DIR`/`AIHOT_ENVIRONMENT`/`AIHOT_RELEASE`、后台会话 Cookie `aihot_admin`、浏览器本地存储的 `aihot:*` 键、SSR 请求头 `x-aihot-ssr`。对外可见的接口字段已经换成与站无关的写法（条目链接是 `links.site`）。

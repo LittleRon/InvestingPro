@@ -4,10 +4,11 @@
 // 每个指标都必须能在两个来源之一查到：FRED（series/observations，免费，需 key）或
 // 世界银行（api.worldbank.org，免费，无需 key，只有年度）。行情类（黄金、ETF）走
 // 单独的行情通道，没有配置 key 时那一块不采集、页面上说明原因，不伪造数据。
-export type BlockKey = "cycles" | "gold" | "oil" | "prices" | "commodities";
+// `derived` 不是外部来源：它由本地已入库的两条序列相减得到（见 DERIVED_SERIES）。
+export type BlockKey = "cycles" | "money" | "gold" | "oil" | "prices" | "commodities";
 export type CountryKey = "CN" | "US";
 export type Frequency = "D" | "W" | "M" | "Q" | "A";
-export type SourceKey = "fred" | "worldbank" | "market" | "eastmoney" | "csindex";
+export type SourceKey = "fred" | "worldbank" | "market" | "eastmoney" | "csindex" | "derived" | "composite";
 /** 这条序列参与哪个周期的滤波；印证类（TFP、专利、研发）不参与。 */
 export type CycleKey = "kondratiev" | "juglar" | "kitchin";
 
@@ -30,11 +31,43 @@ export interface Indicator {
 
 export const BLOCKS: ReadonlyArray<{ key: BlockKey; name: string; hint: string }> = [
   { key: "cycles", name: "经济周期", hint: "康德拉季耶夫长波、朱格拉中周期、基钦短周期，可单独看也可叠加" },
+  { key: "money", name: "货币与剪刀差", hint: "中国 M0、M1、M2 同比，以及 M1−M2 剪刀差（月度，央行口径）" },
   { key: "gold", name: "市场与基金", hint: "黄金现货、主要指数基金，以及上证综指与中证全债" },
   { key: "oil", name: "原油", hint: "布伦特与 WTI 的现货价格" },
-  { key: "prices", name: "CPI / PPI", hint: "消费者与生产者的价格水平，按同比" },
+  { key: "prices", name: "CPI / PPI", hint: "消费者与生产者的价格水平，按同比，以及 PPI−CPI 剪刀差" },
   { key: "commodities", name: "大宗商品", hint: "世界银行 Pink Sheet 的月度全球价格" },
 ];
+
+/**
+ * 派生序列：本地用已入库的两条序列逐月相减，不新增外部数据源。
+ * 两条的口径必须一致（这里都是同比百分数），差值的单位是百分点。
+ */
+export const DERIVED_SERIES = {
+  /** M1 同比减 M2 同比：负得越多，资金越少地从定期转向活期。 */
+  m1_m2_gap: { left: "cn.m1", right: "cn.m2" },
+  /** PPI 同比减 CPI 同比：上游涨价能否传到下游。 */
+  ppi_cpi_gap: { left: "cn.ppi", right: "cn.cpi" },
+} as const;
+
+export type DerivedKey = keyof typeof DERIVED_SERIES;
+
+/**
+ * 合成序列：几条量纲不同的月度指标各自标准化后加权平均（算法在 logic.ts 的 blendOf）。
+ * 中国一侧没有足够长的月度实体经济序列（工业增加值、社融的公开接口拿不到），
+ * 用景气、价格、货币三条合成一条，是能按月观察位置的最长的一条。
+ * 权重是等权的：不做主观的行业判断，页面上把配方写出来，读者可以自己核。
+ */
+export const COMPOSITE_SERIES = {
+  cn_cli: {
+    parts: [
+      { key: "cn.pmi", weight: 1 },
+      { key: "cn.ppi", weight: 1 },
+      { key: "cn.m1", weight: 1 },
+    ],
+  },
+} as const;
+
+export type CompositeKey = keyof typeof COMPOSITE_SERIES;
 
 export const CYCLES: ReadonlyArray<{ key: CycleKey; name: string; short: string; lowYears: number; highYears: number }> = [
   { key: "kondratiev", name: "康德拉季耶夫长波", short: "长波", lowYears: 50, highYears: 60 },
@@ -62,6 +95,12 @@ export const INDICATORS: readonly Indicator[] = [
   { key: "cn.rd", block: "cycles", country: "CN", name: "中国 研发投入强度", unit: "占 GDP %", frequency: "A", source: "worldbank", series: "CN:GB.XPD.RSDV.GD.ZS" },
   { key: "us.patent", block: "cycles", country: "US", name: "美国 居民专利申请", unit: "件", frequency: "A", source: "worldbank", series: "US:IP.PAT.RESD" },
   { key: "cn.patent", block: "cycles", country: "CN", name: "中国 居民专利申请", unit: "件", frequency: "A", source: "worldbank", series: "CN:IP.PAT.RESD" },
+  // 景气与产出，不参与滤波，只当印证读数（PMI 每月一期，GDP 每季一期）。这两条是月度的，
+  // 比上面那些年度序列新得多——中国一侧真正能按月观察的位置主要看它们。
+  { key: "cn.pmi", block: "cycles", country: "CN", name: "中国 制造业 PMI", unit: "指数", frequency: "M", source: "eastmoney", series: "pmi" },
+  { key: "cn.pmi_nonmfg", block: "cycles", country: "CN", name: "中国 非制造业 PMI", unit: "指数", frequency: "M", source: "eastmoney", series: "pmiNonMfg" },
+  // key 不能叫 cn.gdp：那是上面世界银行的年度实际 GDP，康波滤波的基序列。
+  { key: "cn.gdp_yoy", block: "cycles", country: "CN", name: "中国 GDP 当季同比", unit: "同比 %", frequency: "Q", source: "eastmoney", series: "gdp" },
 
   // ===== 黄金与指数基金 =====
   { key: "gold.spot", block: "gold", country: "GLOBAL", name: "黄金现货 XAU/USD", unit: "美元/盎司", frequency: "D", source: "market", series: "XAUUSD" },
@@ -92,9 +131,17 @@ export const INDICATORS: readonly Indicator[] = [
   // 中国 CPI 也停在 2025 年初，都不够用。这两个值本身就是同比，不再自己算一次。
   { key: "cn.cpi", block: "prices", country: "CN", name: "中国 CPI", unit: "同比 %", frequency: "M", source: "eastmoney", series: "cpi" },
   { key: "cn.ppi", block: "prices", country: "CN", name: "中国 PPI", unit: "同比 %", frequency: "M", source: "eastmoney", series: "ppi" },
-  // 景气与货币，放在周期那一块里当印证（都是每月出一期）。
-  { key: "cn.pmi", block: "cycles", country: "CN", name: "中国 制造业 PMI", unit: "指数", frequency: "M", source: "eastmoney", series: "pmi" },
-  { key: "cn.m0", block: "cycles", country: "CN", name: "中国 M0 同比", unit: "同比 %", frequency: "M", source: "eastmoney", series: "m0" },
+  { key: "cn.ppi_cpi_gap", block: "prices", country: "CN", name: "PPI−CPI 剪刀差", unit: "百分点", frequency: "M", source: "derived", series: "ppi_cpi_gap" },
+
+  // ===== 货币与剪刀差（中国，月度，央行口径经东方财富转发）=====
+  // 三个层次分别是流通中现金、狭义货币、广义货币，页面上按同比给出。
+  { key: "cn.m0", block: "money", country: "CN", name: "中国 M0 同比", unit: "同比 %", frequency: "M", source: "eastmoney", series: "m0" },
+  { key: "cn.m1", block: "money", country: "CN", name: "中国 M1 同比", unit: "同比 %", frequency: "M", source: "eastmoney", series: "m1" },
+  { key: "cn.m2", block: "money", country: "CN", name: "中国 M2 同比", unit: "同比 %", frequency: "M", source: "eastmoney", series: "m2" },
+  { key: "cn.m1_m2_gap", block: "money", country: "CN", name: "M1−M2 剪刀差", unit: "百分点", frequency: "M", source: "derived", series: "m1_m2_gap" },
+  // 中国景气合成：PMI、PPI、M1 三条月度等权标准化合成。它是中国一侧唯一够长、够密，
+  // 能拿去分离中周期与短周期的序列（单看任何一条都只反映一个侧面）。
+  { key: "cn.cli", block: "cycles", country: "CN", name: "中国景气合成（PMI·PPI·M1）", unit: "标准化", frequency: "M", source: "composite", series: "cn_cli" },
 
   // ===== 大宗商品（世界银行 Pink Sheet，月度）=====
   { key: "com.copper", block: "commodities", country: "GLOBAL", name: "铜", unit: "美元/吨", frequency: "M", source: "fred", series: "PCOPPUSDM" },

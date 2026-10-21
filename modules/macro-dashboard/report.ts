@@ -63,8 +63,10 @@ export async function snapshotOf(scope: CountryKey, at: string): Promise<{ text:
   }
   for (const list of byKey.values()) list.sort((a, b) => (a.at < b.at ? -1 : 1));
 
+  // 同比只补那些存的是指数/绝对值的序列：CPI、PPI 这类。剪刀差本身已经是百分点，
+  // 再算一次同比没有意义（而且基期接近 0 时会炸），靠 source 排除派生序列。
   const meta = await sql<{ key: string; name: string; unit: string; frequency: string; yoy: boolean | null; block: string; cycle: string | null }[]>`
-    SELECT key, name, unit, frequency, (key LIKE ANY(ARRAY['%cpi%', '%ppi%'])) AS yoy, block, cycle
+    SELECT key, name, unit, frequency, (key LIKE ANY(ARRAY['%cpi%', '%ppi%']) AND source <> 'derived') AS yoy, block, cycle
     FROM macro_indicators WHERE country = ${scope} OR country = 'GLOBAL'`;
 
   const sections: string[] = [];

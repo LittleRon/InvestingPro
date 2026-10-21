@@ -1,6 +1,12 @@
-// 东方财富数据中心：中国的月度宏观数据（PPI、CPI、PMI、货币供应）。免费，无需 key，
+// 东方财富数据中心：中国的月度宏观数据（PPI、CPI、PMI、货币供应、GDP）。免费，无需 key，
 // 但要求带 User-Agent 和 referer，否则不给。返回的 REPORT_DATE 是自然月的第一天。
 // 这几个指标比 FRED 里能拿到的中国序列新得多（FRED 的中国 PPI 只到 2022 年）。
+//
+// 货币供应那张表的字段名不直观，按量级核对过（2026-09，单位亿元）：
+//   FREE_CASH      =  15.0 万亿 = M0（流通中现金）
+//   CURRENCY       = 116.8 万亿 = M1（狭义货币）
+//   BASIC_CURRENCY = 359.6 万亿 = M2（广义货币）
+// 早先把 CURRENCY 当成 M0、BASIC_CURRENCY 当成基础货币，两条线都标错了。
 import { guardedFetch } from "@aihot/backend/lib/http-fetch";
 import { httpError, withRetry } from "./retry.ts";
 import type { Point } from "../logic.ts";
@@ -11,9 +17,14 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 export const EAST_MONEY_REPORTS = {
   ppi: { report: "RPT_ECONOMY_PPI", field: "BASE_SAME" },
   cpi: { report: "RPT_ECONOMY_CPI", field: "NATIONAL_SAME" },
+  // 同一张 PMI 表里的制造业与非制造业两个指数：MAKE 是制造业，NMAKE 是非制造业（建筑业+服务业）。
   pmi: { report: "RPT_ECONOMY_PMI", field: "MAKE_INDEX" },
-  m0: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "CURRENCY_SAME" },
-  baseMoney: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "BASIC_CURRENCY_SAME" },
+  pmiNonMfg: { report: "RPT_ECONOMY_PMI", field: "NMAKE_INDEX" },
+  m0: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "FREE_CASH_SAME" },
+  m1: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "CURRENCY_SAME" },
+  m2: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "BASIC_CURRENCY_SAME" },
+  // GDP 是季度表：REPORT_DATE 落在季末那个月（2026 年第 1–3 季度 → 2026-09-01），SUM_SAME 是当季同比。
+  gdp: { report: "RPT_ECONOMY_GDP", field: "SUM_SAME" },
 } as const;
 
 export type EastMoneyKey = keyof typeof EAST_MONEY_REPORTS;

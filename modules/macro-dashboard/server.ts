@@ -15,7 +15,7 @@ import { composeReport, latestReport } from "./report.ts";
 const DAY_MS = 86_400_000;
 const CACHE_CONTROL = "public, max-age=300, s-maxage=300";
 /** 没有给时间范围时，每个图块默认看多久。周期要看全部，因为长波本来就靠长序列。 */
-const DEFAULT_YEARS: Record<BlockKey, number | null> = { cycles: null, gold: 3, oil: 3, prices: 10, commodities: 10 };
+const DEFAULT_YEARS: Record<BlockKey, number | null> = { cycles: null, money: 10, gold: 3, oil: 3, prices: 10, commodities: 10 };
 
 export interface SeriesData {
   key: string;
@@ -40,6 +40,8 @@ export interface CyclesData {
   confirmation: SeriesData[];
   /** 中国一侧的长序列只有年度，长波位置只能是估计。 */
   note: string | null;
+  /** 叠加时每个频带占多少（短周期最近当下，给得最重）。页面上要写出来。 */
+  weights: Record<string, number>;
 }
 
 export interface DashboardResponse {
@@ -101,32 +103,51 @@ async function loadBlock(block: BlockKey, country: CountryKey, from: string | nu
   if (block === "gold" && !marketProvider()) {
     return { key: block, name: meta.name, hint: meta.hint, series: [], unavailable: "没有配置行情 API key（Twelve Data / Polygon / Alpha Vantage 任选一个），黄金与指数基金的价格取不到" };
   }
-  if (list.some((i) => i.source === "fred") && !fredConfigured()) {
-    return { key: block, name: meta.name, hint: meta.hint, series: [], unavailable: "没有配置 FRED_API_KEY" };
-  }
   const series: SeriesData[] = [];
   for (const ind of list) {
+    // 没配 FRED 时那几条本来就没有数据，跳过即可：一个图块里中国的序列要走东方财富，
+    // 不能因为美国的取不到就整块空白。
+    if (ind.source === "fred" && !fredConfigured()) continue;
     const all = await pointsOf(ind.key);
     if (!all.length) continue;
     series.push(shapeSeries(all, ind, from, to));
   }
+  const missingFred = !fredConfigured() && list.some((i) => i.source === "fred");
   return {
     key: block,
     name: meta.name,
     hint: meta.hint,
     series,
-    unavailable: series.length ? null : "还没有采到数据（第一次采集在每天 06:30）",
+    unavailable: series.length ? null : missingFred
+      ? "这一块只剩需要 FRED_API_KEY 的序列，而它没有配置"
+      : "还没有采到数据（第一次采集在每天 06:30）",
   };
 }
+
+/**
+ * 三个周期的基序列。挑序列的原则是「长波段要时间跨度长，短波段要采样密」：
+ *   · 长波 50–60 年，靠跨度——年度序列虽然一年一个点，但覆盖六十年，比十八年的月度序列有用；
+ *   · 中周期与短周期靠密度——七到十一年、三到五年，一年一个点根本分不出来，必须月度。
+ * 中国一侧没有足够长的月度实体经济序列，中周期与短周期走景气合成指数（PMI·PPI·M1 等权）。
+ * 三条频率不同没关系：叠加前会统一重采样到月度网格（logic.ts 的 resampleMonthly）。
+ */
+const CYCLE_BASE: Record<CountryKey, Record<CycleKey, string>> = {
+  CN: { kondratiev: "cn.gdp", juglar: "cn.cli", kitchin: "cn.cli" },
+  US: { kondratiev: "us.gdp", juglar: "us.fai", kitchin: "us.ind" },
+};
+
+/**
+ * 叠加时三条各占多少。短周期最近当下，起伏也最快，给得最重；长波是背景，给得最轻。
+ * 权重写在页面上，读者能自己核。
+ */
+const OVERLAY_WEIGHTS: Record<CycleKey, number> = { kitchin: 0.5, juglar: 0.3, kondratiev: 0.2 };
 
 /**
  * 三个周期。滤波必须用完整序列——只拿时间范围里的一段去滤波，两端会凭空翘起来——
  * 所以这里读全序列、算完再裁到范围里。
  */
 async function loadCycles(country: CountryKey, from: string | null, to: string | null, only: CycleKey | null): Promise<CyclesData> {
-  const base: Record<CycleKey, string> = country === "CN"
-    ? { kondratiev: "cn.gdp", juglar: "cn.fai", kitchin: "cn.ind" }
-    : { kondratiev: "us.gdp", juglar: "us.fai", kitchin: "us.ind" };
+  const base = CYCLE_BASE[country];
   const cycles: CycleSeries[] = [];
   for (const cycle of CYCLES) {
     if (only && cycle.key !== only) continue;
@@ -144,9 +165,11 @@ async function loadCycles(country: CountryKey, from: string | null, to: string |
     confirmation.push(shapeSeries(all, ind, from, to));
   }
   const note = country === "CN"
-    ? "中国一侧的公开长序列只有年度（1960 年起），长波位置是估计值，随新数据修正"
+    ? "长波用世界银行的年度实际 GDP（1960 年起，跨度够长但一年一个点）；中周期与短周期用月度景气合成指数（PMI·PPI·M1 等权标准化，约 2005 年起），一年一个点分不出三到十一年的波段"
     : "长波的末端若干年是滤波器的估计值，会随新数据修正";
-  return { cycles, overlay: overlayOf(cycles), confirmation, note };
+  // 权重按 cycles 的顺序给（CYCLES 是长波、中周期、短周期）。
+  const weights = cycles.map((c) => OVERLAY_WEIGHTS[c.cycle as CycleKey] ?? 1);
+  return { cycles, overlay: overlayOf(cycles, weights), confirmation, note, weights: Object.fromEntries(cycles.map((c) => [c.cycle, OVERLAY_WEIGHTS[c.cycle as CycleKey] ?? 1])) };
 }
 
 /** 康德拉季耶夫长波的谷底锚点（清单给的是 1982 年），只用来给长期背景，中段与短段另有锚点。 */

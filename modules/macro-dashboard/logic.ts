@@ -154,6 +154,24 @@ export function yoyOf(points: Point[], frequency: Frequency): Point[] {
   }).filter((p) => Number.isFinite(p.value));
 }
 
+/**
+ * 两条序列逐月相减：派生剪刀差（M1−M2、PPI−CPI）用的就是这个。两条的口径必须一致
+ * （都是同比百分数），差值的单位是百分点。
+ * 只出两侧都有的月份——缺一侧就不出点，宁可少一个点也不拿 0 顶上。按 YYYY-MM 对齐，
+ * 输出的日期统一写成当月第一天，这样两侧日期写法不一致也不会整段错位。
+ */
+export function diffOf(left: Point[], right: Point[]): Point[] {
+  const other = new Map(right.map((p) => [p.at.slice(0, 7), p.value]));
+  const out: Point[] = [];
+  for (const p of left) {
+    const month = p.at.slice(0, 7);
+    const value = other.get(month);
+    if (value === undefined || !Number.isFinite(p.value) || !Number.isFinite(value)) continue;
+    out.push({ at: `${month}-01`, value: p.value - value });
+  }
+  return out.sort((a, b) => (a.at < b.at ? -1 : 1));
+}
+
 /** 按时间范围裁剪。from、to 是 YYYY-MM-DD，闭区间。 */
 export function sliceRange(points: Point[], from?: string | null, to?: string | null): Point[] {
   return points.filter((p) => (!from || p.at >= from) && (!to || p.at <= to));
@@ -219,27 +237,107 @@ export function anchoredCycle(at: string[], troughs: string[], nominalMonths: nu
   });
 }
 
-/** 三条周期曲线按时间对齐后相加，就是叠加态：三条各自站什么位置，合起来又是什么位置。 */
-export function overlayOf(cycles: CycleSeries[]): { points: Point[]; provisionalFrom: string | null; shortSample: boolean } {
-  const byDate = new Map<string, number[]>();
-  for (const c of cycles) {
-    for (const p of c.points) {
-      if (!Number.isFinite(p.value)) continue;
-      const list = byDate.get(p.at) ?? [];
-      list.push(p.value);
-      byDate.set(p.at, list);
+const monthIndex = (at: string) => Number(at.slice(0, 4)) * 12 + Number(at.slice(5, 7)) - 1;
+const monthName = (m: number) => `${String(Math.floor(m / 12)).padStart(4, "0")}-${String((m % 12) + 1).padStart(2, "0")}-01`;
+
+/**
+ * 重采样到月度网格：年度、季度的点之间按线性插值补出中间的月份。
+ * 三条频率不同的序列要相加，必须落在同一张网格上。不这么做，相加就只能取日期的交集——
+ * 一条月度序列会被两条季度的拖成只剩季初那四个点，等于白扔掉四分之三的观测。
+ * 已经是月度的序列原样返回。
+ */
+export function resampleMonthly(points: Point[]): Point[] {
+  const clean = points.filter((p) => Number.isFinite(p.value) && /^\d{4}-\d{2}-\d{2}$/.test(p.at)).sort((a, b) => (a.at < b.at ? -1 : 1));
+  if (clean.length < 2) return clean;
+  const from = monthIndex(clean[0]!.at);
+  const to = monthIndex(clean[clean.length - 1]!.at);
+  const out: Point[] = [];
+  let i = 0;
+  for (let m = from; m <= to; m++) {
+    // 走到最后一个起点不晚于本月的已知点，本月的插值就在它和下一个之间。
+    while (i + 1 < clean.length && monthIndex(clean[i + 1]!.at) <= m) i++;
+    const a = clean[i]!;
+    const b = clean[i + 1];
+    const ma = monthIndex(a.at);
+    if (!b || monthIndex(b.at) === ma) { out.push({ at: monthName(m), value: a.value }); continue; }
+    const f = (m - ma) / (monthIndex(b.at) - ma);
+    out.push({ at: monthName(m), value: a.value + (b.value - a.value) * f });
+  }
+  return out;
+}
+
+/**
+ * 标准化：减均值除标准差。三条周期曲线的幅度天生差得远（实际 GDP 的起伏小、工业产出大），
+ * 直接相加的话幅度最大的那条会把其余两条盖掉，叠加看起来就像它单独在动。
+ */
+export function zscoreOf(points: Point[]): Point[] {
+  const clean = points.filter((p) => Number.isFinite(p.value)).map((p) => p.value);
+  if (clean.length === 0) return points.map((p) => ({ at: p.at, value: NaN }));
+  const mu = clean.reduce((a, v) => a + v, 0) / clean.length;
+  const variance = clean.reduce((a, v) => a + (v - mu) ** 2, 0) / clean.length;
+  const sd = Math.sqrt(variance);
+  // 整段没有变化的序列区分不了任何时点，一律记 0，也不该让整条叠加失效。
+  if (sd < 1e-9) return points.map((p) => ({ at: p.at, value: Number.isFinite(p.value) ? 0 : NaN }));
+  return points.map((p) => ({ at: p.at, value: Number.isFinite(p.value) ? (p.value - mu) / sd : NaN }));
+}
+
+/**
+ * 合成指数：几条量纲不同的序列各自标准化后加权平均，合成一条可比的时间序列。
+ * 用来把「制造业 PMI（水平值）、PPI 同比（百分数）、M1 同比（百分数）」这类
+ * 不能直接相加的指标合成一条月度景气曲线。
+ * 只在所有成分都有的月份出点；某成分整段没有变化时记 0，区分不了时点但也不该让合成失效。
+ */
+export function blendOf(inputs: { points: Point[]; weight: number }[]): Point[] {
+  const byMonth = inputs.map(({ points }) => {
+    const map = new Map<string, number>();
+    for (const p of points) if (Number.isFinite(p.value)) map.set(p.at.slice(0, 7), p.value);
+    return map;
+  });
+  if (!byMonth.length) return [];
+  let months = [...byMonth[0]!.keys()].sort();
+  for (const m of byMonth.slice(1)) months = months.filter((k) => m.has(k));
+  if (!months.length) return [];
+  // 每个成分的均值与标准差只在共同月份上算：这样合成不受各条长度不一的影响。
+  const stats = byMonth.map((map) => {
+    const values = months.map((k) => map.get(k)!);
+    const mu = values.reduce((a, v) => a + v, 0) / values.length;
+    const sd = Math.sqrt(values.reduce((a, v) => a + (v - mu) ** 2, 0) / values.length);
+    return { mu, sd };
+  });
+  const total = inputs.reduce((a, i) => a + i.weight, 0) || 1;
+  return months.map((k) => {
+    let sum = 0;
+    for (let i = 0; i < inputs.length; i++) {
+      const { mu, sd } = stats[i]!;
+      const z = sd < 1e-9 ? 0 : (byMonth[i]!.get(k)! - mu) / sd;
+      sum += z * inputs[i]!.weight;
     }
-  }
-  const dates = [...byDate.keys()].sort();
-  // 只在三条都到齐的点上相加，缺一条就不合，免得叠加态看起来像某一条单独在动。
-  const need = cycles.length;
-  const points: Point[] = [];
+    return { at: `${k}-01`, value: sum / total };
+  });
+}
+
+/** 三条周期曲线按时间对齐后相加，就是叠加态：三条各自站什么位置，合起来又是什么位置。 */
+export function overlayOf(
+  cycles: CycleSeries[],
+  /** 与 cycles 一一对应的权重，默认等权。短周期贴近当下，通常给得比长波重。 */
+  weights?: number[],
+): { points: Point[]; provisionalFrom: string | null; shortSample: boolean } {
+  // 每条先落到月度网格，再各自标准化：不同频率的三条这才可比、可加。
+  const byMonth = cycles.map((c) => {
+    const map = new Map<string, number>();
+    for (const p of zscoreOf(resampleMonthly(c.points))) if (Number.isFinite(p.value)) map.set(p.at.slice(0, 7), p.value);
+    return map;
+  });
+  const w = cycles.map((_, i) => weights?.[i] ?? 1);
+  const total = w.reduce((a, b) => a + b, 0) || 1;
+  // 只在三条都到齐的月份上合成，缺一条就不合，免得叠加态看起来像某一条单独在动。
+  let months = byMonth.length ? [...byMonth[0]!.keys()].sort() : [];
+  for (const m of byMonth.slice(1)) months = months.filter((k) => m.has(k));
+  const points: Point[] = months.map((k) => ({
+    at: `${k}-01`,
+    value: byMonth.reduce((sum, m, i) => sum + (m.get(k) ?? 0) * w[i]!, 0) / total,
+  }));
   let provisionalFrom: string | null = null;
-  for (const at of dates) {
-    const values = byDate.get(at)!;
-    if (values.length < need) continue;
-    points.push({ at, value: values.reduce((a, b) => a + b, 0) / values.length });
-  }
   for (const c of cycles) if (c.provisionalFrom && (!provisionalFrom || c.provisionalFrom < provisionalFrom)) provisionalFrom = c.provisionalFrom;
   return { points, provisionalFrom, shortSample: cycles.some((c) => c.shortSample) };
 }

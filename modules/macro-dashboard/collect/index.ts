@@ -1,8 +1,8 @@
 // 采集全部指标，写进模块自己的两张表。一条指标采集失败不影响别的指标，
 // 结果按来源汇总成一份报告，交给定时任务记进运行记录。
 import { sql } from "@aihot/backend/db";
-import { INDICATORS, type Indicator } from "../indicators.ts";
-import type { Point } from "../logic.ts";
+import { COMPOSITE_SERIES, DERIVED_SERIES, INDICATORS, type CompositeKey, type DerivedKey, type Indicator } from "../indicators.ts";
+import { blendOf, diffOf, type Point } from "../logic.ts";
 import { fredConfigured, fetchFred } from "./fred.ts";
 import { fetchWorldBank } from "./worldbank.ts";
 import { fetchMarket, marketProvider } from "./market.ts";
@@ -30,6 +30,29 @@ async function lastPointAt(key: string): Promise<string | null> {
   const [row] = await sql<{ at: Date }[]>`
     SELECT at FROM macro_points WHERE indicator_key = ${key} ORDER BY at DESC LIMIT 1`;
   return row ? new Date(row.at).toISOString().slice(0, 10) : null;
+}
+
+/** 一条已入库序列的全部点，按时间正序。 */
+async function allPointsOf(key: string): Promise<Point[]> {
+  const rows = await sql<{ at: Date; value: number }[]>`SELECT at, value FROM macro_points WHERE indicator_key = ${key} ORDER BY at`;
+  return rows.map((r) => ({ at: new Date(r.at).toISOString().slice(0, 10), value: Number(r.value) }));
+}
+
+/** 一条合成序列：几条已入库的月度指标标准化后加权平均（算法在 logic.ts 的 blendOf）。 */
+async function compositeOf(key: CompositeKey): Promise<Point[]> {
+  const { parts } = COMPOSITE_SERIES[key];
+  const lists = await Promise.all(parts.map((p) => allPointsOf(p.key)));
+  return blendOf(lists.map((points, i) => ({ points, weight: parts[i]!.weight })));
+}
+
+/**
+ * 一条派生序列：两条已入库的序列逐月相减（逻辑在 logic.ts 的 diffOf）。两侧都不存在时没有点，
+ * 采集会跳过；每轮都重算，因为它依赖的那两条可能刚在这一轮更新过。
+ */
+async function derivedOf(key: DerivedKey): Promise<Point[]> {
+  const { left, right } = DERIVED_SERIES[key];
+  const [l, r] = await Promise.all([allPointsOf(left), allPointsOf(right)]);
+  return diffOf(l, r);
 }
 
 /** 一批点写库：同一时点后来的值覆盖先前的（数据源会修订历史）。 */
@@ -63,6 +86,8 @@ async function pull(ind: Indicator, lastAt: string | null): Promise<Point[]> {
   if (ind.source === "worldbank") return fetchWorldBank(ind.series, lastAt ? year : undefined);
   if (ind.source === "eastmoney") return fetchEastMoney(ind.series as EastMoneyKey);
   if (ind.source === "csindex") return fetchCsIndex(ind.series as CsIndexKey);
+  if (ind.source === "derived") return derivedOf(ind.series as DerivedKey);
+  if (ind.source === "composite") return compositeOf(ind.series as CompositeKey);
   // 行情接口按分钟限流（Twelve Data 每分钟 8 次，Alpha Vantage 每分钟 5 次），
   // 一条一条来，间隔取两家都够用的 12 秒。
   await sleep(12000);
@@ -85,7 +110,9 @@ export async function collectIndicators(now = new Date()): Promise<CollectSummar
     if (ind.source === "fred" && !fred) { summary.failed.push({ key: ind.key, reason: "FRED_API_KEY 未配置" }); continue; }
     if (ind.source === "market" && !market) { summary.skipped++; continue; }
     const lastAt = await lastPointAt(ind.key);
-    if (!stale(lastAt, ind.frequency, now)) { summary.skipped++; continue; }
+    // 派生与合成序列每轮都重算：它们不发请求，成本只是读几张已入库的表，
+    // 而它们依赖的那几条可能刚在这一轮更新过。
+    if (ind.source !== "derived" && ind.source !== "composite" && !stale(lastAt, ind.frequency, now)) { summary.skipped++; continue; }
     try {
       const points = await pull(ind, lastAt);
       if (!points.length) { summary.skipped++; continue; }

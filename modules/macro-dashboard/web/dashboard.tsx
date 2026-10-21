@@ -1,5 +1,6 @@
-// /dashboard：宏观仪表盘。五块图（经济周期、黄金与指数基金、原油、CPI/PPI、大宗商品），
+// /dashboard：宏观仪表盘。六块图（经济周期、货币与剪刀差、市场与基金、原油、CPI/PPI、大宗商品），
 // 可以切换中国与美国、改时间范围；每天 06:30 采集一次，之后写一份 PEST 报告。
+import { useState } from "react";
 import { useLoaderData } from "react-router";
 import type { BlockData, CyclesData, DashboardResponse } from "../server.ts";
 import { cachedPage, loadOr404, pageHeaders } from "@aihot/web/lib/api.server";
@@ -10,7 +11,7 @@ import { EmptyState } from "@aihot/web/components/ui/Page";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { CYCLES, type CountryKey, type CycleKey } from "../indicators.ts";
-import { LineChart, fmtValue, type Line } from "./chart.tsx";
+import { LineChart, LineLegend, fmtValue, type Line } from "./chart.tsx";
 
 export const handle: Screen = { tab: "dashboard", name: "仪表盘" };
 export { pageHeaders as headers };
@@ -61,19 +62,6 @@ function toLines(series: { key: string; name: string; points: { at: string; valu
   return series.map((s, i) => ({ key: s.key, name: s.name, tone: TONES[i % TONES.length]!, points: s.points }));
 }
 
-function Legend({ lines }: { lines: Line[] }) {
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-4">
-      {lines.map((l) => (
-        <span key={l.key} className="flex items-center gap-1.5">
-          <span className={`h-1.5 w-3 rounded-full bg-current ${l.tone}`} />
-          {l.name}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 /** 顶部切换：国家、时间范围。都是链接，交给服务端渲染，不引客户端状态。 */
 function Controls({ country, range, cycle }: { country: CountryKey; range: Range; cycle: CycleKey | "all" }) {
   const link = (next: { country?: CountryKey; years?: number | null; cycle?: CycleKey | "all" }) => {
@@ -113,17 +101,61 @@ function Controls({ country, range, cycle }: { country: CountryKey; range: Range
   );
 }
 
+/**
+ * 叠加曲线落在什么时间密度上。三条基序列频率不同时，相加只能取日期的交集——美国是
+ * 两条季度加一条月度，交点只剩季初那四个月；中国三条都只有年度。这条说明就是让人看见
+ * 叠加曲线到底是「每月一个点」还是「每年一个点」，别把稀疏的折线当成连续走势读。
+ */
+function cadenceOf(points: { at: string }[]): string | null {
+  if (points.length < 2) return null;
+  const span = Date.parse(points[points.length - 1]!.at) - Date.parse(points[0]!.at);
+  const days = span / (points.length - 1) / 86_400_000;
+  if (days > 300) return "约每年一个点";
+  if (days > 70) return "约每季一个点";
+  if (days > 20) return "约每月一个点";
+  return "按日";
+}
+
 function CyclesBlock({
   cycles,
   country,
   range,
   cycle,
 }: { cycles: CyclesData; country: CountryKey; range: Range; cycle: CycleKey | "all" }) {
+  // 哪条线收起来了。收起的线不画，也不参与纵轴范围，所以只看一条时它的起伏能铺满整块。
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const shown = cycle === "all" ? cycles.cycles : cycles.cycles.filter((c) => c.cycle === cycle);
-  const lines: Line[] = cycle === "all"
-    ? [{ key: "overlay", name: "三者叠加", tone: "text-ink", points: cycles.overlay.points, dashedFrom: cycles.overlay.provisionalFrom },
-       ...shown.map((c, i) => ({ key: c.cycle, name: c.name, tone: TONES[i % TONES.length]!, points: c.points, dashedFrom: c.provisionalFrom }))]
-    : shown.map((c) => ({ key: c.cycle, name: c.name, tone: "text-accent", points: c.points, dashedFrom: c.provisionalFrom }));
+  // 叠加那条要站出来：粗、不透明。它底下的三条压成陪衬，否则四根线一样重，分不出主次。
+  const all: Line[] = cycle === "all"
+    ? [
+        { key: "overlay", name: "三者叠加", tone: "text-ink", points: cycles.overlay.points, dashedFrom: cycles.overlay.provisionalFrom, width: 2.8 },
+        ...shown.map((c, i) => ({ key: c.cycle, name: c.name, tone: TONES[i % TONES.length]!, points: c.points, dashedFrom: c.provisionalFrom, width: 1.4, muted: true })),
+      ]
+    : shown.map((c) => ({ key: c.cycle, name: c.name, tone: "text-accent", points: c.points, dashedFrom: c.provisionalFrom, width: 2.2 }));
+  const visible = all.filter((l) => !hidden.has(l.key));
+  const toggle = (key: string) => setHidden((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  // overlayOf 只给点和两个限制标记，末端的值自己取。
+  const overlayLatest = cycles.overlay.points.length ? cycles.overlay.points[cycles.overlay.points.length - 1]!.value : null;
+  const note = (l: Line) => {
+    if (l.key === "overlay") {
+      const bits: string[] = [];
+      if (overlayLatest !== null && Number.isFinite(overlayLatest)) bits.push(fmtValue(overlayLatest));
+      const cadence = cadenceOf(cycles.overlay.points);
+      if (cadence) bits.push(cadence);
+      return bits.join(" · ") || null;
+    }
+    const c = shown.find((x) => x.cycle === l.key);
+    if (!c) return null;
+    const bits: string[] = [];
+    if (c.latest !== null) bits.push(fmtValue(c.latest));
+    if (c.phase) bits.push(c.phase === "rising" ? "上升" : "下降");
+    if (c.shortSample) bits.push("样本过短");
+    return bits.join(" · ") || null;
+  };
   const tabs = [{ key: "all" as const, name: "叠加" }, ...CYCLES.map((c) => ({ key: c.key, name: c.short }))];
   const params = (next: string) => {
     const p = new URLSearchParams({ country });
@@ -132,6 +164,19 @@ function CyclesBlock({
     if (next !== "all") p.set("cycle", next);
     return `/dashboard?${p}`;
   };
+  // 叠加曲线能不能当结论读：把几个硬限制直接写在图上，不藏在折叠里。
+  const overlay = cycles.overlay;
+  const cadence = cadenceOf(overlay.points);
+  // 权重是服务端定的（短周期最近当下，给得最重），页面上照抄一份，读者能自己核。
+  const weightText = CYCLES.map((c) => `${c.short} ${cycles.weights?.[c.key] ?? 1}`).join(" · ");
+  const caveat = overlay.points.length === 0
+    ? null
+    : [
+        overlay.shortSample ? "有频带的序列比一个完整周期还短，分离出来的位置仅供参考" : null,
+        overlay.provisionalFrom ? `${overlay.provisionalFrom} 起是滤波器的估计值（虚线），新数据进来会被修正` : null,
+        `三条先统一到月度网格、各自标准化，再按权重合成（${weightText}）`,
+        cadence && cadence !== "按日" ? `叠加实际${cadence}，范围受三条里最短的那条限制` : null,
+      ].filter(Boolean) as string[];
   return (
     <section aria-label="经济周期" className="card p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
@@ -145,11 +190,21 @@ function CyclesBlock({
         </span>
       </div>
       <p className="mt-1 text-[12px] leading-[1.7] text-ink-4">
-        长波 50–60 年看实际 GDP，中周期 7–11 年看固定资本形成，短周期 3–5 年看工业产出。滤波用 Christiano-Fitzgerald 带通，纵轴是相对趋势的偏离百分比。
-        {country === "CN" && "中国的固定资本形成是现价口径（世行给中国的不变价序列只有一年）"}
+        长波 50–60 年看实际 GDP，中周期 7–11 年与短周期 3–5 年看月度景气（美国看固定资本形成与工业产出，中国看 PMI·PPI·M1 的等权标准化合成）。滤波用 Christiano-Fitzgerald 带通，纵轴是相对趋势的偏离百分比。
+        {country === "CN" && "长波仍用世界银行的年度实际 GDP：五六十年的波段要的是时间跨度，一年一个点够用；中短周期要的是采样密度，所以换到月度"}
       </p>
-      {lines.length ? <div className="mt-3"><LineChart lines={lines} height={210} zero /></div> : <div className="mt-3"><EmptyState title="还没有周期数据">先让采集跑一轮（每天 06:30）。</EmptyState></div>}
-      <Legend lines={lines} />
+      {cycle === "all" && visible.length > 1 && (
+        <p className="mt-1.5 text-[11.5px] leading-[1.7] text-ink-4">
+          粗的那条是三者叠加，其余三条是陪衬。点下面的图例可以把某条线收起来单独看，鼠标移到图上读出那一刻的值。
+        </p>
+      )}
+      {visible.length ? <div className="mt-3"><LineChart lines={visible} height={210} zero /></div> : <div className="mt-3"><EmptyState title="没有可见的曲线">把下面的图例点回来。</EmptyState></div>}
+      <LineLegend lines={all} hidden={hidden} onToggle={toggle} note={note} />
+      {caveat && caveat.length > 0 && (
+        <ul className="mt-2 space-y-1 rounded-sheet bg-bg-sunk px-3 py-2 text-[11.5px] leading-[1.7] text-ink-3 dark:bg-bg-muted">
+          {caveat.map((line) => <li key={line}>{line}</li>)}
+        </ul>
+      )}
       {cycles.cycles.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-ink-3">
           {cycles.cycles.map((c) => (
@@ -266,7 +321,18 @@ function AnaloguesBlock({ data }: { data: NonNullable<DashboardResponse["analogu
 }
 
 function PlainBlock({ block }: { block: BlockData }) {
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const lines = toLines(block.series);
+  const visible = lines.filter((l) => !hidden.has(l.key));
+  const toggle = (key: string) => setHidden((prev) => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const note = (l: Line) => {
+    const s = block.series.find((x) => x.key === l.key);
+    return s?.latest ? `${fmtValue(s.latest.value)}（${s.latest.at}）` : null;
+  };
   return (
     <section aria-label={block.name} className="card p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -277,16 +343,8 @@ function PlainBlock({ block }: { block: BlockData }) {
         <p className="mt-3 text-[12.5px] leading-[1.7] text-ink-4">{block.unavailable}</p>
       ) : lines.length ? (
         <>
-          <div className="mt-3"><LineChart lines={lines} /></div>
-          <Legend lines={lines} />
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-4">
-            {block.series.map((s) => (
-              <span key={s.key}>
-                {s.name} <span className="num text-ink-2">{s.latest ? fmtValue(s.latest.value) : "—"}</span>
-                {s.latest && <span className="text-ink-4">（{s.latest.at}）</span>}
-              </span>
-            ))}
-          </div>
+          <div className="mt-3"><LineChart lines={visible.length ? visible : lines} /></div>
+          <LineLegend lines={lines} hidden={hidden} onToggle={toggle} note={note} />
         </>
       ) : (
         <div className="mt-3"><EmptyState title="还没有数据">先让采集跑一轮（每天 06:30）。</EmptyState></div>
