@@ -9,8 +9,8 @@ export type BlockKey = "cycles" | "money" | "gold" | "oil" | "prices" | "commodi
 export type CountryKey = "CN" | "US";
 export type Frequency = "D" | "W" | "M" | "Q" | "A";
 export type SourceKey = "fred" | "worldbank" | "market" | "eastmoney" | "csindex" | "derived" | "composite";
-/** 这条序列参与哪个周期的滤波；印证类（TFP、专利、研发）不参与。 */
-export type CycleKey = "kondratiev" | "juglar" | "kitchin";
+/** 这条序列参与哪个周期的滤波；印证类（TFP、专利、研发）不参与。kuznets（库兹涅茨房地产周期）数据待接入。 */
+export type CycleKey = "kondratiev" | "kuznets" | "juglar" | "kitchin";
 
 export interface Indicator {
   key: string;
@@ -30,7 +30,7 @@ export interface Indicator {
 }
 
 export const BLOCKS: ReadonlyArray<{ key: BlockKey; name: string; hint: string }> = [
-  { key: "cycles", name: "经济周期", hint: "康德拉季耶夫长波、朱格拉中周期、基钦短周期，可单独看也可叠加" },
+  { key: "cycles", name: "经济周期", hint: "康德拉季耶夫长波、库兹涅茨房地产周期、朱格拉中周期、基钦短周期，可单独看也可叠加" },
   { key: "money", name: "货币与剪刀差", hint: "中国 M0、M1、M2 同比，以及 M1−M2 剪刀差（月度，央行口径）" },
   { key: "gold", name: "市场与基金", hint: "黄金现货、主要指数基金，以及上证综指与中证全债" },
   { key: "oil", name: "原油", hint: "布伦特与 WTI 的现货价格" },
@@ -71,6 +71,7 @@ export type CompositeKey = keyof typeof COMPOSITE_SERIES;
 
 export const CYCLES: ReadonlyArray<{ key: CycleKey; name: string; short: string; lowYears: number; highYears: number }> = [
   { key: "kondratiev", name: "康德拉季耶夫长波", short: "长波", lowYears: 50, highYears: 60 },
+  { key: "kuznets", name: "库兹涅茨房地产周期", short: "房地产", lowYears: 15, highYears: 25 },
   { key: "juglar", name: "朱格拉中周期", short: "中周期", lowYears: 7, highYears: 11 },
   { key: "kitchin", name: "基钦短周期", short: "短周期", lowYears: 3, highYears: 5 },
 ];
@@ -142,6 +143,14 @@ export const INDICATORS: readonly Indicator[] = [
   // 中国景气合成：PMI、PPI、M1 三条月度等权标准化合成。它是中国一侧唯一够长、够密，
   // 能拿去分离中周期与短周期的序列（单看任何一条都只反映一个侧面）。
   { key: "cn.cli", block: "cycles", country: "CN", name: "中国景气合成（PMI·PPI·M1）", unit: "标准化", frequency: "M", source: "composite", series: "cn_cli" },
+
+  // 库兹涅茨房地产周期：用国房景气指数（2012=100），东财 RPT_INDUSTRY_INDEX，月度。
+  // 该序列 2016 年起有数，长度不足以跑完整的 15-25 年滤波，但可作为当前位置的旁证。
+  { key: "cn.housing", block: "cycles", country: "CN", name: "中国 国房景气指数", unit: "指数 2012=100", frequency: "M", source: "eastmoney", series: "housing", cycle: "kuznets" },
+
+  // 财政政策维度：用财政收入当月同比做代理（收入高增=财政空间大、支出倾向积极）。
+  // 东财没有独立的财政支出月度页面，收入同比是方向性指标。
+  { key: "cn.fiscal_revenue", block: "cycles", country: "CN", name: "中国 财政收入同比", unit: "同比 %", frequency: "M", source: "eastmoney", series: "fiscal_revenue" },
 
   // ===== 大宗商品（世界银行 Pink Sheet，月度）=====
   { key: "com.copper", block: "commodities", country: "GLOBAL", name: "铜", unit: "美元/吨", frequency: "M", source: "fred", series: "PCOPPUSDM" },

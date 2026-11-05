@@ -8,6 +8,7 @@ import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { EmptyState } from "@aihot/web/components/ui/Page";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
+import { ReportNowButton } from "./report-now.tsx";
 
 export const handle: Screen = { tab: "dashboard", name: "PEST 分析" };
 export { pageHeaders as headers };
@@ -26,9 +27,27 @@ interface ReportResponse {
     snapshot: string;
   };
   missing?: string;
+  /** 最近一次报告任务的运行记录（job_runs），解释「为什么还没有」。 */
+  status?: { job: string; status: string; at: string; error: string | null; detail: Record<string, unknown> | null } | null;
 }
 
 const SCOPE_NAME: Record<string, string> = { CN: "中国", US: "美国" };
+
+/** 把报告任务的运行记录说人话（解释「为什么还没有」）。 */
+function explainStatus(status: { job: string; status: string; error: string | null; detail: Record<string, unknown> | null } | null): string {
+  if (!status) return "还从未跑过报告任务（检查 worker 是否在跑、定时任务是否注册）。";
+  if (status.status === "running") return "报告任务正在跑，稍等片刻刷新。";
+  if (status.status === "failed") {
+    const reason = status.error ? status.error.split("\n")[0]!.slice(0, 120) : "未知错误";
+    return `报告任务上次失败：${reason}`;
+  }
+  if (status.status === "ok") {
+    const detail = status.detail as { written?: boolean; reason?: string } | null;
+    if (detail?.written === false) return detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
+    return "上次任务跑过了，但没有写出报告。";
+  }
+  return `报告任务最近一次状态：${status.status}`;
+}
 
 export async function loader({ request }: { request: Request }) {
   const url = new URL(request.url);
@@ -68,7 +87,13 @@ export default function ReportPage() {
 
       {!at || !report.payload ? (
         <div className="card rounded-sheet">
-          <EmptyState title="还没有这一天的报告">{report.missing ?? "每天 06:40 写一次，采集到足够数据才有。"}</EmptyState>
+          <EmptyState
+            title="还没有这一天的报告"
+            action={<ReportNowButton scope={scope as "CN" | "US"} />}
+          >
+            {report.missing ?? "每天 06:40 写一次，采集到足够数据才有。"}
+            <span className="block mt-1 text-ink-3">{explainStatus(report.status ?? null)}</span>
+          </EmptyState>
         </div>
       ) : (
         <article className="space-y-4">

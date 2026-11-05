@@ -15,32 +15,38 @@ const BASE = "https://datacenter-web.eastmoney.com/api/data/v1/get";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 export const EAST_MONEY_REPORTS = {
-  ppi: { report: "RPT_ECONOMY_PPI", field: "BASE_SAME" },
-  cpi: { report: "RPT_ECONOMY_CPI", field: "NATIONAL_SAME" },
-  // 同一张 PMI 表里的制造业与非制造业两个指数：MAKE 是制造业，NMAKE 是非制造业（建筑业+服务业）。
-  pmi: { report: "RPT_ECONOMY_PMI", field: "MAKE_INDEX" },
-  pmiNonMfg: { report: "RPT_ECONOMY_PMI", field: "NMAKE_INDEX" },
-  m0: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "FREE_CASH_SAME" },
-  m1: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "CURRENCY_SAME" },
-  m2: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "BASIC_CURRENCY_SAME" },
-  // GDP 是季度表：REPORT_DATE 落在季末那个月（2026 年第 1–3 季度 → 2026-09-01），SUM_SAME 是当季同比。
-  gdp: { report: "RPT_ECONOMY_GDP", field: "SUM_SAME" },
+  ppi: { report: "RPT_ECONOMY_PPI", field: "BASE_SAME", indicatorId: undefined },
+  cpi: { report: "RPT_ECONOMY_CPI", field: "NATIONAL_SAME", indicatorId: undefined },
+  pmi: { report: "RPT_ECONOMY_PMI", field: "MAKE_INDEX", indicatorId: undefined },
+  pmiNonMfg: { report: "RPT_ECONOMY_PMI", field: "NMAKE_INDEX", indicatorId: undefined },
+  m0: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "FREE_CASH_SAME", indicatorId: undefined },
+  m1: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "CURRENCY_SAME", indicatorId: undefined },
+  m2: { report: "RPT_ECONOMY_CURRENCY_SUPPLY", field: "BASIC_CURRENCY_SAME", indicatorId: undefined },
+  gdp: { report: "RPT_ECONOMY_GDP", field: "SUM_SAME", indicatorId: undefined },
+  housing: { report: "RPT_INDUSTRY_INDEX", field: "INDICATOR_VALUE", indicatorId: "EMM00121987" },
+  fiscal_revenue: { report: "RPT_ECONOMY_INCOME", field: "BASE_SAME", indicatorId: undefined },
 } as const;
 
 export type EastMoneyKey = keyof typeof EAST_MONEY_REPORTS;
 
 /**
- * 一个报表的月度序列。报表里的值是当月同比（PPI/CPI/M0）或指数（PMI），
- * 直接用，不再自己算同比。
+ * 一个报表的月度序列。报表里的值是当月同比（PPI/CPI/M0）或指数（PMI/国房景气），
+ * 直接用，不再自己算同比。housing（国房景气指数）走 RPT_INDUSTRY_INDEX，
+ * 按 INDICATOR_ID 过滤，数据有重复行（每月两条），去重后返回。
  */
 export async function fetchEastMoney(key: EastMoneyKey): Promise<Point[]> {
-  const { report, field } = EAST_MONEY_REPORTS[key];
+  const { report, field, indicatorId } = EAST_MONEY_REPORTS[key];
   const url = new URL(BASE);
   url.searchParams.set("reportName", report);
   url.searchParams.set("columns", "ALL");
   url.searchParams.set("pageSize", "500");
   url.searchParams.set("sortColumns", "REPORT_DATE");
   url.searchParams.set("sortTypes", "1");
+  if (indicatorId) {
+    url.searchParams.set("filter", `(INDICATOR_ID="${indicatorId}")`);
+    url.searchParams.set("source", "WEB");
+    url.searchParams.set("client", "WEB");
+  }
   const rows = await withRetry(3, async () => {
     const res = await guardedFetch(url.href, {
       timeoutMs: 30_000,
@@ -52,11 +58,14 @@ export async function fetchEastMoney(key: EastMoneyKey): Promise<Point[]> {
     if (!json.result?.data?.length) throw new Error(`东财 ${key}：没有数据（${json.message ?? "空"}）`);
     return json.result.data;
   });
+  const seen = new Set<string>();
   const points: Point[] = [];
   for (const row of rows) {
     const at = String(row.REPORT_DATE ?? "").slice(0, 10);
     const value = Number(row[field]);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(at) || !Number.isFinite(value)) continue;
+    if (seen.has(at)) continue; // 东财 RPT_INDUSTRY_INDEX 每月有两条重复记录
+    seen.add(at);
     points.push({ at, value });
   }
   return points.sort((a, b) => (a.at < b.at ? -1 : 1));

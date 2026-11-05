@@ -12,6 +12,7 @@ import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { CYCLES, type CountryKey, type CycleKey } from "../indicators.ts";
 import { LineChart, LineLegend, fmtValue, type Line } from "./chart.tsx";
+import { ReportNowButton } from "./report-now.tsx";
 
 export const handle: Screen = { tab: "dashboard", name: "仪表盘" };
 export { pageHeaders as headers };
@@ -57,6 +58,21 @@ export function meta() {
 }
 
 const TONES = ["text-accent", "text-hot", "text-ink-3", "text-ink-4"];
+
+/** 把报告任务的运行记录说人话（解释「为什么还没有报告」）。 */
+function explainReportStatus(status: { job: string; status: string; error: string | null; detail: Record<string, unknown> | null }): string {
+  if (status.status === "running") return "报告任务正在跑，稍等片刻刷新。";
+  if (status.status === "failed") {
+    const reason = status.error ? status.error.split("\n")[0]!.slice(0, 120) : "未知错误";
+    return `报告任务上次失败：${reason}`;
+  }
+  if (status.status === "ok") {
+    const detail = status.detail as { written?: boolean; reason?: string } | null;
+    if (detail?.written === false) return detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
+    return "上次任务跑过了，但没有写出报告。";
+  }
+  return `报告任务最近一次状态：${status.status}`;
+}
 
 function toLines(series: { key: string; name: string; points: { at: string; value: number }[] }[]): Line[] {
   return series.map((s, i) => ({ key: s.key, name: s.name, tone: TONES[i % TONES.length]!, points: s.points }));
@@ -125,10 +141,11 @@ function CyclesBlock({
   // 哪条线收起来了。收起的线不画，也不参与纵轴范围，所以只看一条时它的起伏能铺满整块。
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const shown = cycle === "all" ? cycles.cycles : cycles.cycles.filter((c) => c.cycle === cycle);
-  // 叠加那条要站出来：粗、不透明。它底下的三条压成陪衬，否则四根线一样重，分不出主次。
+  // 叠加那条要站出来：粗、不透明。它底下的几条压成陪衬，否则四根线一样重，分不出主次。
+  const overlayName = cycles.cycles.length >= 4 ? "四者叠加" : cycles.cycles.length === 3 ? "三者叠加" : "叠加";
   const all: Line[] = cycle === "all"
     ? [
-        { key: "overlay", name: "三者叠加", tone: "text-ink", points: cycles.overlay.points, dashedFrom: cycles.overlay.provisionalFrom, width: 2.8 },
+        { key: "overlay", name: overlayName, tone: "text-ink", points: cycles.overlay.points, dashedFrom: cycles.overlay.provisionalFrom, width: 2.8 },
         ...shown.map((c, i) => ({ key: c.cycle, name: c.name, tone: TONES[i % TONES.length]!, points: c.points, dashedFrom: c.provisionalFrom, width: 1.4, muted: true })),
       ]
     : shown.map((c) => ({ key: c.cycle, name: c.name, tone: "text-accent", points: c.points, dashedFrom: c.provisionalFrom, width: 2.2 }));
@@ -190,7 +207,7 @@ function CyclesBlock({
         </span>
       </div>
       <p className="mt-1 text-[12px] leading-[1.7] text-ink-4">
-        长波 50–60 年看实际 GDP，中周期 7–11 年与短周期 3–5 年看月度景气（美国看固定资本形成与工业产出，中国看 PMI·PPI·M1 的等权标准化合成）。滤波用 Christiano-Fitzgerald 带通，纵轴是相对趋势的偏离百分比。
+        长波 50–60 年看实际 GDP，房地产周期 15–25 年看国房景气指数，中周期 7–11 年与短周期 3–5 年看月度景气（美国看固定资本形成与工业产出，中国看 PMI·PPI·M1 的等权标准化合成）。滤波用 Christiano-Fitzgerald 带通，纵轴是相对趋势的偏离百分比。
         {country === "CN" && "长波仍用世界银行的年度实际 GDP：五六十年的波段要的是时间跨度，一年一个点够用；中短周期要的是采样密度，所以换到月度"}
       </p>
       {cycle === "all" && visible.length > 1 && (
@@ -218,6 +235,21 @@ function CyclesBlock({
           ))}
         </div>
       )}
+      {cycles.cycles.some((c) => c.shortSample) && (
+        <p className="mt-2 text-[11.5px] leading-[1.6] text-ink-4">
+          房地产周期的序列比一个完整周期还短（国房景气指数 2016 年 2 月起），滤波器拿不到足够的邻点，位置仅供参考。
+        </p>
+      )}
+      {cycles.pending.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[12px] text-ink-4">
+          {cycles.pending.map((p) => (
+            <span key={p.key} className="flex items-baseline gap-1.5">
+              {p.short}
+              <span className="text-[11px] text-ink-4">数据暂未接入</span>
+            </span>
+          ))}
+        </div>
+      )}
       <details className="disclosure group/method mt-4 text-[12px] text-ink-4">
         <summary className="flex items-center gap-1.5 py-1 transition-colors hover:text-ink-2">技术侧的印证与这个图的局限</summary>
         <div className="space-y-2 pb-2 pl-[21px] pt-2 leading-[1.75] text-ink-3">
@@ -226,6 +258,11 @@ function CyclesBlock({
             长波靠的是长序列：序列越短，滤波器在两端能用的邻点越少，位置就越是估计。图里末端按虚线画，新数据进来会被修正。
             技术一侧的印证看三条：全要素生产率、研发投入强度、居民专利申请量。
           </p>
+          {cycles.pending.length > 0 && (
+            <p className="text-ink-4">
+              以下周期数据暂未接入：{cycles.pending.map((p) => p.name).join("、")}。
+            </p>
+          )}
           {cycles.confirmation.length > 0 && (
             <p className="text-ink-4">
               当前印证读数：{cycles.confirmation.map((c) => `${c.name} ${c.latest ? `${fmtValue(c.latest.value)}（${c.latest.at}）` : "—"}`).join("；")}
@@ -382,13 +419,19 @@ export default function DashboardPage() {
                 最近一份：<span className="num">{data.latestReport.at}</span>，按政治、经济、社会、技术四个象限写当天的数据变化。
               </>
             ) : (
-              "报告还没有生成（每天 06:40 写一次，采集到足够数据才有）。"
+              <>
+                报告还没有生成（每天 06:40 写一次，采集到足够数据才有）。
+                {!data.latestReport && data.reportStatus && <span className="block mt-1 text-ink-3">{explainReportStatus(data.reportStatus)}</span>}
+              </>
             )}
           </p>
         </div>
-        <IntentLink to={`/dashboard/report?scope=${country}`} className="rounded-full border border-line-soft px-3.5 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:text-accent">
-          查看报告
-        </IntentLink>
+        <div className="flex items-center gap-3">
+          <ReportNowButton scope={country} />
+          <IntentLink to={`/dashboard/report?scope=${country}`} className="rounded-full border border-line-soft px-3.5 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:text-accent">
+            查看报告
+          </IntentLink>
+        </div>
       </section>
 
       {!data.sources.fred && (
