@@ -64,19 +64,19 @@ export function meta() {
   });
 }
 
-/** 保存配置的 fetcher（客户端提交，不整页刷新）。 */
-const saveFetcher = useFetcher<{ ok: boolean; error?: string }>();
-
-/** AI 解读的 fetcher（触发生成）。 */
-const interpFetcher = useFetcher<{ ok: boolean; error?: string }>();
-
-const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
-const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
-
 export default function AllocationPage() {
   const loaderData = useLoaderData<typeof loader>();
   const { clock, allocation, cycles, horizons } = loaderData.data;
   const interpretation = loaderData.interpretation as InterpretationResponse | null;
+
+  /** 保存配置的 fetcher（客户端提交，不整页刷新）。 */
+  const saveFetcher = useFetcher<{ ok: boolean; error?: string }>();
+
+  /** AI 解读的 fetcher（触发生成）。 */
+  const interpFetcher = useFetcher<{ ok: boolean; error?: string }>();
+
+  const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
+  const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
 
   const totalAssets = allocation.totalAssets;
   const holdings = {
