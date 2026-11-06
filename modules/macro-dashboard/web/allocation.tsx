@@ -1,7 +1,7 @@
 // /dashboard/allocation：动态组合策略配置。输入总资产、当前持仓、时效范围，展示规则引擎算出的
 // 各资产大类基线权重 + 金额。配置保存在服务器（挂管理员账户，不做读者账户）。AI 解读通过按钮触发，
 // 读者打开页面不自动调模型（项目规则）。
-import { useLoaderData } from "react-router";
+import { useLoaderData, useLocation } from "react-router";
 import { useState, useEffect } from "react";
 import { cachedPage, loadOr404, pageHeaders } from "@aihot/web/lib/api.server";
 import { pageReuse } from "@aihot/web/lib/page-reuse";
@@ -140,7 +140,11 @@ export default function AllocationPage() {
     gold: allocation.weights.find((w) => w.key === "gold")?.holdings ?? 0,
   };
 
-  const loginLink = `/api/auth/login?return=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+  // 这个页面是 SSR 的：地址必须来自 router，不能在渲染时读 window（服务端没有 window，
+  // 一读就抛 ReferenceError，整页变成 500）。刷新页面走 SSR，站内跳转走客户端渲染，
+  // 所以这种错误很容易只在一半路径上出现。
+  const { pathname, search } = useLocation();
+  const loginLink = `/api/auth/login?return=${encodeURIComponent(pathname + search)}`;
 
   /** 保存配置：收集表单数据，带 CSRF token POST JSON。 */
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {

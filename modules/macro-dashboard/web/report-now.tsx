@@ -2,9 +2,10 @@
 // 再 POST /api/admin/macro/report 入队，worker 先采集再写报告。提交后轮询报告接口，
 // 直到今天的报告出现（或轮询超时），把过程如实写在按钮下方。未登录时给登录链接。
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
 import type { CountryKey } from "../indicators.ts";
 
-type Phase = "checking" | "not-admin" | "submitting" | "polling" | "done" | "timeout" | "error";
+type Phase = "checking" | "ready" | "not-admin" | "submitting" | "polling" | "done" | "timeout" | "error";
 
 interface AdminMe { name: string; csrf: string; dev: boolean }
 
@@ -13,6 +14,9 @@ const BTN = "rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors d
 export function ReportNowButton({ scope, label = "立即编写今天" }: { scope: CountryKey; label?: string }) {
   const [phase, setPhase] = useState<Phase>("checking");
   const [message, setMessage] = useState("");
+  // 地址从 router 拿，不读 window：这个组件会跟着 SSR 的页面一起渲染。
+  const { pathname, search } = useLocation();
+  const loginLink = `/api/auth/login?return=${encodeURIComponent(pathname + search)}`;
 
   // 公开页面没有 admin-layout 的 loader，CSRF 直接从 /api/admin/me 取。
   useEffect(() => {
@@ -24,6 +28,8 @@ export function ReportNowButton({ scope, label = "立即编写今天" }: { scope
         if (res.status === 401) { setPhase("not-admin"); return; }
         if (!res.ok) throw new Error(`me ${res.status}`);
         const me = await res.json() as AdminMe;
+        // 登录成功必须离开 "checking"：漏了这一句按钮就会永远置灰显示「检查登录状态…」。
+        setPhase("ready");
         setMessage(`以 ${me.name} 的身份提交`);
       } catch (error) {
         if (!cancelled) { setPhase("not-admin"); setMessage((error as Error).message); }
@@ -75,7 +81,7 @@ export function ReportNowButton({ scope, label = "立即编写今天" }: { scope
   if (phase === "checking") return <button type="button" className={`${BTN} border-line-soft text-ink-3`} disabled>检查登录状态…</button>;
   if (phase === "not-admin") {
     return (
-      <a href={`/api/auth/login?return=${encodeURIComponent(window.location.pathname + window.location.search)}`} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>
+      <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>
         登录后可手动编写
       </a>
     );
