@@ -28,6 +28,8 @@ interface InterpretationResponse {
   scope: string;
   at: string;
   model: string | null;
+  generation: number;
+  regeneratedAt: string | null;
   payload: {
     interpretation: string;
     watchpoints: string[];
@@ -42,6 +44,15 @@ interface InterpretationResponse {
       notes: string[];
     };
   };
+}
+
+/** 生成状态：有没有在跑、服务器上的解读是不是比客户端这份新。 */
+interface InterpStatus {
+  running: boolean;
+  lastStatus: string | null;
+  lastError: string | null;
+  generation: number;
+  regeneratedAt: string | null;
 }
 
 interface AdminMe { name: string; csrf: string; dev: boolean }
@@ -69,11 +80,14 @@ export function meta() {
 export default function AllocationPage() {
   const loaderData = useLoaderData<typeof loader>();
   const { clock, allocation, cycles, horizons } = loaderData.data;
-  const interpretation = loaderData.interpretation as InterpretationResponse | null;
+  // 解读放在本地 state：生成完直接换掉，不靠整页刷新（页面本身有 300 秒缓存，
+  // 刷新也可能拿到旧的）。
+  const [interpretation, setInterpretation] = useState<InterpretationResponse | null>(
+    loaderData.interpretation as InterpretationResponse | null,
+  );
 
   // CSRF token：公开页面没有 admin-layout 的 loader，直接从 /api/admin/me 取（和 report-now.tsx 一致）。
   const [admin, setAdmin] = useState<AdminMe | null>(null);
-  const [adminChecked, setAdminChecked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,7 +97,25 @@ export default function AllocationPage() {
         if (cancelled) return;
         if (res.ok) setAdmin(await res.json() as AdminMe);
       } catch { /* not admin */ }
-      if (!cancelled) setAdminChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 页面本身带 300 秒缓存，HTML 里的解读可能是旧的。hydration 之后立刻拉一次最新的
+  // （接口是 no-store），服务器上版本更新就换掉，保证读者看到的始终是最新一版。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/site/dashboard/allocation/interpretation", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const fresh = await res.json() as InterpretationResponse | { missing: string };
+        if (cancelled || !fresh || "missing" in fresh || !fresh.payload) return;
+        setInterpretation((prev) => (!prev || fresh.generation >= prev.generation ? fresh : prev));
+      } catch { /* 网络抖动，用 SSR 那份 */ }
     })();
     return () => { cancelled = true; };
   }, []);
@@ -140,26 +172,68 @@ export default function AllocationPage() {
     }
   };
 
-  /** 生成 AI 解读：带 CSRF token POST，入队后立刻返回。 */
-  const handleInterp = async () => {
+  /**
+   * 生成 AI 解读：带 CSRF token POST，入队后立刻返回。
+   * force=true 时覆盖同一天原来那条（重新生成）。
+   * 入队后轮询状态接口，服务器上出现更新的解读就刷新页面，读者自动看到最新一版。
+   */
+  const handleInterp = async (force: boolean) => {
     if (!admin) { setInterpState("not-admin"); setInterpMsg("需要管理员登录"); return; }
     setInterpState("generating");
-    setInterpMsg("正在入队…");
+    setInterpMsg(force ? "正在重新生成…" : "正在生成…");
     try {
-    const res = await fetch("/api/admin/macro/allocation/interpretation", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
-      body: "{}",
-    });
+      const res = await fetch("/api/admin/macro/allocation/interpretation", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
+        body: JSON.stringify(force ? { force: true } : {}),
+      });
       if (res.status === 401) { setInterpState("not-admin"); setInterpMsg("登录状态过期，请重新登录"); return; }
       if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `触发失败（${res.status}）`);
-      setInterpState("done");
-      setInterpMsg("已触发，稍后刷新查看");
+      setInterpMsg("已提交，正在生成…");
+      await pollForNewInterp(interpretation?.generation ?? 0);
     } catch (error) {
       setInterpState("error");
       setInterpMsg((error as Error).message);
     }
+  };
+
+  /**
+   * 轮询生成状态：服务器上的 generation 变大就是有新解读。
+   * 拿到新解读后直接换本地 state——不整页刷新（页面有 300 秒缓存，刷新也可能读到旧的）。
+   */
+  const pollForNewInterp = async (base: number) => {
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 5_000));
+      try {
+        const res = await fetch("/api/site/dashboard/allocation/interpretation/status", { credentials: "same-origin", cache: "no-store" });
+        if (!res.ok) continue;
+        const status = await res.json() as InterpStatus;
+        if (status.generation > base) {
+          const fresh = await (await fetch("/api/site/dashboard/allocation/interpretation", {
+            credentials: "same-origin",
+            cache: "no-store",
+          })).json() as InterpretationResponse;
+          if (fresh?.payload) {
+            setInterpretation(fresh);
+            setInterpState("done");
+            setInterpMsg(`已生成第 ${fresh.generation} 版`);
+          } else {
+            setInterpState("done");
+            setInterpMsg("已生成，页面正在刷新…");
+            window.location.reload();
+          }
+          return;
+        }
+        if (status.lastStatus === "failed" && !status.running) {
+          setInterpState("error");
+          setInterpMsg(status.lastError ?? "生成失败");
+          return;
+        }
+      } catch { /* 网络抖动，继续等 */ }
+    }
+    setInterpState("error");
+    setInterpMsg("等了 3 分钟还没生成完，稍后刷新看看");
   };
 
   const BTN = "rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50";
@@ -269,21 +343,36 @@ export default function AllocationPage() {
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <h2 className="text-[15px] font-semibold text-ink">AI 解读</h2>
             <span className="text-[11.5px] text-ink-4">
-              {interpretation ? `生成于 ${interpretation.at}` : "还没有生成解读"}
+              {interpretation
+                ? <>生成于 {interpretation.at}{interpretation.generation > 1 && <> · 第 {interpretation.generation} 版</>}</>
+                : "还没有生成解读"}
             </span>
           </div>
           {/* 管理员触发按钮 */}
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             {admin
-              ? <button type="button" onClick={handleInterp} disabled={interpState === "generating"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>
-                  {interpState === "generating" ? "正在生成…" : "生成 AI 解读"}
-                </button>
+              ? <>
+                  <button type="button" onClick={() => handleInterp(false)} disabled={interpState === "generating"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>
+                    {interpState === "generating" ? "正在生成…" : interpretation ? "重新生成" : "生成 AI 解读"}
+                  </button>
+                  {interpretation && interpState !== "generating" && (
+                    <button type="button" onClick={() => handleInterp(true)} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>
+                      强制覆盖生成
+                    </button>
+                  )}
+                </>
               : <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>登录后生成解读</a>
             }
-            {interpState === "done" && <span className="ml-3 text-[12px] text-accent">已触发，稍后刷新查看</span>}
-            {interpState === "error" && <span className="ml-3 text-[12px] text-hot">{interpMsg}</span>}
-            {interpState === "not-admin" && <span className="ml-3 text-[12px] text-ink-4">{interpMsg}</span>}
+            {interpState === "generating" && <span className="text-[12px] text-ink-3">{interpMsg}</span>}
+            {interpState === "done" && <span className="text-[12px] text-accent">{interpMsg}</span>}
+            {interpState === "error" && <span className="text-[12px] text-hot">{interpMsg}</span>}
+            {interpState === "not-admin" && <span className="text-[12px] text-ink-4">{interpMsg}</span>}
           </div>
+          {interpretation && interpretation.regeneratedAt && (
+            <p className="mt-2 text-[11.5px] text-ink-4">
+              最后一次重新生成：{new Date(interpretation.regeneratedAt).toLocaleString("zh-CN", { hour12: false })}
+            </p>
+          )}
           {/* 解读正文 */}
           {interpretation && (
             <div className="mt-4 space-y-3">

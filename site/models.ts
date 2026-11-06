@@ -17,7 +17,13 @@ export interface ModelPreset {
   vision?: boolean;
 }
 
-/** 具名的模型示例（每个要配自己的密钥）。用不上可以删掉。 */
+/**
+ * 具名的模型示例（每个要配自己的密钥）。用不上可以删掉。
+ *
+ * 同一家厂家、同一个模型、不同的密钥，就是多写几条：key 名不一样、apiKeyEnv 不一样，
+ * 后台「模型与评测」页会把它们当成可以分别选择的模型（比如把预筛放在便宜的一把钥匙上，
+ * 把评分放在另一把上）。
+ */
 export const PRESETS: Record<string, ModelPreset> = {
   // GLM 5.3 Flash always reasons; the lowest effort keeps short structured tasks fast.
   "glm-5.3-flash": {

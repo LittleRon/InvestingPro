@@ -5,7 +5,8 @@
 import type { AdminModels, BeforeJson } from "@aihot/contracts/admin";
 import { sql } from "../db.ts";
 import { capabilities, capabilityAcceptsModel, invalidateModelCache, modelSources } from "../editorial/models.ts";
-import { MODELS } from "../providers/llm.ts";
+import { MODELS, extraModelKeys, extraModelsError } from "../providers/llm.ts";
+import { credential } from "../config.ts";
 import { audit } from "../audit.ts";
 
 interface UsageRow {
@@ -95,8 +96,24 @@ export async function modelsOverview(days = 7): Promise<BeforeJson<AdminModels>>
         estimate: priced(u),
       })),
   }));
-  const choices = Object.values(MODELS).map((m) => ({ key: m.key, service: m.service, vision: !!m.vision }));
-  return { days, capabilities: steps, choices, history, benches };
+  // 可选的模型：站点写好的具名预设、部署时用环境变量登记的、以及 default。
+  // configured=false 表示地址或密钥还没配好——选它会在调用时报错，这里先标出来。
+  const envModels = new Set(Object.keys(extraModelKeys()));
+  const choices = Object.values(MODELS).map((m) => {
+    const baseUrl = m.baseUrl ?? credential("models", m.baseUrlEnv);
+    const apiKey = m.apiKey ?? credential("models", m.apiKeyEnv);
+    return {
+      key: m.key,
+      service: m.service,
+      vision: !!m.vision,
+      model: m.model,
+      configured: Boolean(baseUrl && apiKey && m.model),
+      source: (m.key === "default" ? "default" : envModels.has(m.key) ? "env" : "preset") as "preset" | "env" | "default",
+      baseUrlEnv: m.baseUrlEnv,
+      apiKeyEnv: m.apiKeyEnv,
+    };
+  });
+  return { days, capabilities: steps, choices, history, benches, extraModelsError: extraModelsError() };
 }
 
 /** Switches a capability to another registered model (or back to the environment/default when null). */
@@ -104,10 +121,22 @@ export async function switchModel(capability: string, model: string | null, reas
   const c = capabilities()[capability];
   if (!c) throw Object.assign(new Error("unknown capability"), { statusCode: 400 });
   if (!reason.trim()) throw Object.assign(new Error("a reason is required"), { statusCode: 400 });
+  let warning: string | null = null;
   if (model !== null) {
     const spec = MODELS[model];
     if (!spec) throw Object.assign(new Error("unknown model"), { statusCode: 400 });
     if (!capabilityAcceptsModel(c, spec)) throw Object.assign(new Error("this capability needs a vision model"), { statusCode: 400 });
+    // 地址或密钥还没配好：不拦着切换（可能正要补上），但要提醒，否则第一次调用才报错。
+    const baseUrl = spec.baseUrl ?? credential("models", spec.baseUrlEnv);
+    const apiKey = spec.apiKey ?? credential("models", spec.apiKeyEnv);
+    if (!baseUrl || !apiKey || !spec.model) {
+      const missing = [
+        !spec.model ? "model" : null,
+        !baseUrl ? (spec.baseUrlEnv || "baseUrl") : null,
+        !apiKey ? (spec.apiKeyEnv || "apiKey") : null,
+      ].filter(Boolean).join(", ");
+      warning = `模型 ${model} 还缺 ${missing}，切换已生效，但调用会失败直到补上`;
+    }
   }
   const before = (await modelSources())[capability];
   if (model === null) await sql`DELETE FROM settings WHERE key = ${`models.${capability}`}`;
@@ -118,5 +147,5 @@ export async function switchModel(capability: string, model: string | null, reas
   invalidateModelCache();
   const after = (await modelSources())[capability];
   await audit(actor, "models.switch", `capability:${capability}`, reason, before ?? null, after ?? null);
-  return { capability, before, after };
+  return { capability, before, after, warning };
 }

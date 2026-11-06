@@ -361,9 +361,15 @@ export interface AdminModelUsage {
 export interface AdminModels {
   days: number;
   capabilities: Array<{ key: string; label: string; env: string; defaultModel: string; vision: boolean; current: { model: string; source: "admin" | "env" | "default" }; usage: AdminModelUsage[] }>;
-  choices: Array<{ key: string; service: string; vision: boolean }>;
+  /**
+   * 可以选的模型。configured=false 表示地址或密钥还没配好，选了会在调用时报错。
+   * source: preset=站点写好的具名模型，env=部署时用 LLM_EXTRA_MODELS 登记的，default=环境变量里的那把。
+   */
+  choices: Array<{ key: string; service: string; vision: boolean; model: string; configured: boolean; source: "preset" | "env" | "default"; baseUrlEnv: string; apiKeyEnv: string }>;
   history: Array<{ at: Timestamp; actor: string; subject: string; reason: string | null; before: { model: string; source: string } | null; after: { model: string; source: string } | null }>;
   benches: Array<{ id: string; label: string; sample_size: number; prompt_version: string | null; models: string[]; created_at: Timestamp }>;
+  /** LLM_EXTRA_MODELS 写错了的原因（JSON 语法错、缺字段等）；没写错是 null。 */
+  extraModelsError: string | null;
 }
 
 export interface AdminSelectBenchRun {

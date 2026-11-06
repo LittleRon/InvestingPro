@@ -58,20 +58,22 @@ const REPORT_NOW_QUEUE = defineQueue<{ scope: CountryKey }>({
 /**
  * 「AI 解读」队列：管理员点按钮触发，跑在 worker 的一个模块队列里。
  * 读当前时钟 + 周期 + 三视图权重，调模型写解读，存 macro_interpretations。
+ * force 为真时覆盖同一天原来那条（管理员点「重新生成」）。
  */
-const INTERP_QUEUE = defineQueue<Record<string, never>>({
+const INTERP_QUEUE = defineQueue<{ force?: boolean }>({
   name: "macro.interp",
   options: { policy: "singleton", retryLimit: 1, expireInSeconds: 3600 },
   worker: { batchSize: 1 },
-  run: async () => recordRun("macro.interp", async () => {
+  run: async (jobs) => recordRun("macro.interp", async () => {
     const config = await loadAllocationConfig(null);
     const data = await loadAllocation(config);
+    const force = jobs.some((j) => j.force);
     const result = await composeInterpretation({
       clock: data.clock,
       cycles: data.cycles,
       horizons: data.horizons,
       totalAssets: data.allocation.totalAssets,
-    });
+    }, undefined, force);
     return [{ ...result }] as InterpRun[];
   }),
 });
@@ -345,9 +347,28 @@ export default defineServerModule({
       sendJson(req, reply, await loadAllocation(config), "alloc");
     });
     // AI 解读：公开读取最近一次的解读结果（读者打开页面不自动调模型）。
+    // 不缓存：管理员重新生成后内容会变，缓存住就一直是旧的（客户端 no-store 挡不住服务端/CDN 缓存）。
     app.get("/api/site/dashboard/allocation/interpretation", async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
       const interp = await latestInterpretation();
-      sendJson(req, reply, interp ?? { missing: "还没有生成解读" }, "interp");
+      reply.header("Content-Type", "application/json; charset=utf-8")
+        .send(JSON.stringify(interp ?? { missing: "还没有生成解读" }));
+    });
+    // AI 解读的生成状态：管理员点按钮后轮询这个接口，知道有没有在跑、跑完了没有。
+    // 不缓存——轮询要看到最新的状态，缓存住就永远停在旧值。
+    app.get("/api/site/dashboard/allocation/interpretation/status", async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+      const interp = await latestInterpretation();
+      const [run] = await sql<{ status: string; started_at: Date; error: string | null; detail: Record<string, unknown> | null }[]>`
+        SELECT status, started_at, error, detail FROM job_runs WHERE job = 'macro.interp' ORDER BY started_at DESC, id DESC LIMIT 1`;
+      reply.header("Content-Type", "application/json; charset=utf-8").send(JSON.stringify({
+        running: run?.status === "running",
+        lastStatus: run?.status ?? null,
+        lastError: run?.error ?? null,
+        // 客户端拿自己那份的 generation 来比，变大了就是服务器上有新的。
+        generation: interp?.generation ?? 0,
+        regeneratedAt: interp?.regeneratedAt ?? null,
+      }));
     });
     // 管理员「立即编写」：先采集再写，跑在 worker 的一个队列里；会话 + CSRF（和 /api/admin 一致）。
     app.post("/api/admin/macro/report", async (req, reply) => {
@@ -385,13 +406,15 @@ export default defineServerModule({
       return reply.send({ ok: true });
     });
     // 管理员「生成 AI 解读」：入队后立刻返回，worker 读当前配置调模型写解读。session + CSRF。
+    // force=1 时覆盖同一天原来那条（重新生成）。
     app.post("/api/admin/macro/allocation/interpretation", async (req, reply) => {
       reply.header("Cache-Control", "no-store");
       const admin = await sessionPrincipal(req.headers.cookie);
       if (!admin) return reply.code(401).send({ detail: "先登录后台" });
       if (req.headers["x-csrf-token"] !== admin.csrf) return reply.code(403).send({ detail: "CSRF token 缺失或过期" });
+      const body = (req.body ?? {}) as { force?: boolean };
       try {
-        await enqueueInterpretation();
+        await enqueueInterpretation(body.force === true);
       } catch (error) {
         return reply.code(503).send({ detail: (error as Error).message });
       }
@@ -443,9 +466,9 @@ async function enqueueReportNow(scope: CountryKey): Promise<void> {
   if (!id) throw new Error("队列拒绝了这次立即编写（可能有另一次正在跑）");
 }
 
-/** 管理员触发 AI 解读：入队后立刻返回，worker 读当前配置调模型写解读。 */
-async function enqueueInterpretation(): Promise<void> {
-  const id = await enqueueOn(INTERP_QUEUE, {});
+/** 管理员触发 AI 解读：入队后立刻返回，worker 读当前配置调模型写解读。force 时覆盖原来那条。 */
+async function enqueueInterpretation(force = false): Promise<void> {
+  const id = await enqueueOn(INTERP_QUEUE, { force });
   if (!id) throw new Error("队列拒绝了这次解读请求（可能有另一次正在跑）");
 }
 

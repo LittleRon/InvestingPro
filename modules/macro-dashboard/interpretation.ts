@@ -92,6 +92,10 @@ export interface StoredInterpretation {
   scope: string;
   at: string;
   model: string | null;
+  /** 这是第几次生成（第一次是 1，重新生成会加一）。 */
+  generation: number;
+  /** 最后一次生成的时间；第一次生成时为 null。 */
+  regeneratedAt: string | null;
   payload: {
     interpretation: string;
     watchpoints: string[];
@@ -137,10 +141,17 @@ function snapshotOf(input: InterpInput): { text: string; quadrant: string } {
   return { text, quadrant: clock.quadrantName };
 }
 
-/** 生成并入库。同一天已有解读时不重复写（不重复花模型的钱）。 */
-export async function composeInterpretation(input: InterpInput, at = beijingToday()): Promise<{ written: boolean; reason?: string }> {
+/**
+ * 生成并入库。默认同一天不重复写（不重复花模型的钱）；管理员点「重新生成」时传 force，
+ * 覆盖同一天原来那条并把生成次数加一，读者始终看到最新的一版。
+ */
+export async function composeInterpretation(
+  input: InterpInput,
+  at = beijingToday(),
+  force = false,
+): Promise<{ written: boolean; reason?: string; generation?: number }> {
   const [existing] = await sql<{ at: Date }[]>`SELECT at FROM macro_interpretations WHERE scope = 'CN' AND at = ${at}`;
-  if (existing) return { written: false, reason: "今天已经有解读了" };
+  if (existing && !force) return { written: false, reason: "今天已经有解读了" };
 
   const { text, quadrant } = snapshotOf(input);
   const p = prompt();
@@ -167,6 +178,9 @@ export async function composeInterpretation(input: InterpInput, at = beijingToda
     schema: InterpSchema,
     temperature: 0.3,
     maxTokens: 2500,
+    // 强制重新生成时换一个 attemptTag：回执的去重键是由内容算的，内容没变就会复用旧答案，
+    // 用户明确点了重新生成就该重新调一次模型。
+    attemptTag: force ? `regen:${Date.now()}` : undefined,
     // 推理模型有时不给 JSON；退回按标签读文本。
     parse: (content) => {
       try {
@@ -190,17 +204,29 @@ export async function composeInterpretation(input: InterpInput, at = beijingToda
       notes: input.horizons.medium.notes,
     },
   };
-  await sql`INSERT INTO macro_interpretations (scope, at, model, payload)
-    VALUES ('CN', ${at}, ${model}, ${JSON.stringify(payload)}::jsonb)
-    ON CONFLICT (scope, at) DO NOTHING`;
-  return { written: true };
+  // 覆盖式写入：重新生成时更新同一天那条，生成次数加一。
+  const [row] = await sql<{ generation: number }[]>`
+    INSERT INTO macro_interpretations (scope, at, model, payload, generation, regenerated_at)
+    VALUES ('CN', ${at}, ${model}, ${JSON.stringify(payload)}::jsonb, 1, now())
+    ON CONFLICT (scope, at) DO UPDATE
+      SET model = EXCLUDED.model, payload = EXCLUDED.payload,
+          generation = macro_interpretations.generation + 1, regenerated_at = now()
+    RETURNING generation`;
+  return { written: true, generation: row?.generation ?? 1 };
 }
 
 export async function latestInterpretation(): Promise<StoredInterpretation | null> {
-  const [row] = await sql<{ scope: string; at: Date; model: string | null; payload: StoredInterpretation["payload"] }[]>`
-    SELECT scope, at, model, payload FROM macro_interpretations WHERE scope = 'CN' ORDER BY at DESC LIMIT 1`;
+  const [row] = await sql<{ scope: string; at: Date; model: string | null; payload: StoredInterpretation["payload"]; generation: number; regenerated_at: Date | null }[]>`
+    SELECT scope, at, model, payload, generation, regenerated_at FROM macro_interpretations WHERE scope = 'CN' ORDER BY at DESC LIMIT 1`;
   if (!row) return null;
-  return { scope: row.scope, at: new Date(row.at).toISOString().slice(0, 10), model: row.model, payload: row.payload };
+  return {
+    scope: row.scope,
+    at: new Date(row.at).toISOString().slice(0, 10),
+    model: row.model,
+    generation: row.generation,
+    regeneratedAt: row.regenerated_at ? new Date(row.regenerated_at).toISOString() : null,
+    payload: row.payload,
+  };
 }
 
 function beijingToday(now = new Date()): string {

@@ -5,6 +5,7 @@ import type { AdminModels } from "@aihot/contracts/admin";
 import { SITE } from "@aihot/site";
 import { adminGet } from "../../lib/admin.server";
 import { useAdminAction } from "../../features/admin/action";
+import { toast } from "../../features/admin/toast";
 import { bj, money, num } from "../../features/admin/format";
 import { AdminPage, Badge, Button, Card, DataTable, Empty, Field, FilterChips, ReasonDialog, Select } from "../../features/admin/ui";
 import { webModules } from "../../site-modules";
@@ -19,6 +20,8 @@ export async function loader({ request }: Route.LoaderArgs) {
 export const meta: Route.MetaFunction = () => [{ title: `模型与评测 · ${SITE.name} 后台` }];
 
 const SOURCE_LABEL = { admin: "后台切换", env: "环境变量", default: "代码默认" } as const;
+/** 模型本身是从哪儿来的：站点写好的具名预设、部署时用环境变量登记的、还是 default。 */
+const SOURCE_LABEL_MODEL = { preset: "站点预设", env: "环境变量登记", default: "默认模型" } as const;
 
 /** A cost the provider did not report and no price covers: a link to the prices when a module keeps them. */
 function Unpriced() {
@@ -155,9 +158,11 @@ export default function ModelsAdmin({ loaderData: m }: Route.ComponentProps) {
         confirmLabel="切换"
         busy={pending === "switch"}
         onClose={() => setTarget(null)}
-        onSubmit={async (reason) =>
-          (await run("POST", `/api/admin/models/${target!.key}`, { model: choice === "__default" ? null : choice, reason }, { label: "switch", success: "已切换，下一次调用生效" })) !== null
-        }
+        onSubmit={async (reason) => {
+          const res = await run<{ warning?: string | null }>("POST", `/api/admin/models/${target!.key}`, { model: choice === "__default" ? null : choice, reason }, { label: "switch", success: "已切换，下一次调用生效" });
+          if (res?.warning) toast(res.warning, "error");
+          return res !== null;
+        }}
       >
         <Field label="模型">
           <Select value={choice} onChange={(e) => setChoice(e.target.value)}>
@@ -165,13 +170,51 @@ export default function ModelsAdmin({ loaderData: m }: Route.ComponentProps) {
               .filter((x) => !target?.vision || x.vision)
               .map((x) => (
                 <option key={x.key} value={x.key}>
-                  {x.key}（{x.service}）
+                  {x.key}（{x.service} · {x.model}）{x.configured ? "" : " · 未配置密钥"}
                 </option>
               ))}
             <option value="__default">恢复默认（{target?.env} 或 {target?.defaultModel}）</option>
           </Select>
         </Field>
       </ReasonDialog>
+
+      <Card title="可用的模型" pad={false} className="mt-5">
+        {m.extraModelsError && (
+          <div className="border-b border-line-soft px-4 py-3 text-[12.5px] leading-[1.7] text-hot">
+            <p className="font-semibold">LLM_EXTRA_MODELS 写错了，登记的模型没有生效：</p>
+            <p className="mt-1 font-mono text-[11.5px]">{m.extraModelsError}</p>
+          </div>
+        )}
+        <DataTable
+          dense
+          rows={m.choices}
+          rowKey={(x) => x.key}
+          columns={[
+            { key: "k", label: "名字", render: (x) => <span className="whitespace-nowrap font-mono text-[12px]">{x.key}</span> },
+            { key: "s", label: "厂家", render: (x) => <span className="whitespace-nowrap">{x.service}</span> },
+            { key: "m", label: "模型", render: (x) => <span className="whitespace-nowrap font-mono text-[12px] text-ink-3">{x.model || "—"}</span> },
+            {
+              key: "src",
+              label: "来源",
+              render: (x) => <Badge tone="muted">{SOURCE_LABEL_MODEL[x.source]}</Badge>,
+            },
+            {
+              key: "c",
+              label: "状态",
+              render: (x) => (
+                x.configured
+                  ? <span className="text-ink-3">可用</span>
+                  : <span className="text-hot" title={`缺 ${x.baseUrlEnv || "baseUrl"} 或 ${x.apiKeyEnv || "apiKey"}`}>未配置密钥</span>
+              ),
+            },
+            {
+              key: "v",
+              label: "看图",
+              render: (x) => (x.vision ? "是" : "否"),
+            },
+          ]}
+        />
+      </Card>
     </AdminPage>
   );
 }

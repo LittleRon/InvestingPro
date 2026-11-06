@@ -14,6 +14,9 @@ export interface ModelSpec {
   model: string;
   baseUrlEnv: string;
   apiKeyEnv: string;
+  /** 地址与密钥的直接值（环境变量登记的模型用）；没有就走 baseUrlEnv / apiKeyEnv。 */
+  baseUrl?: string | null;
+  apiKey?: string | null;
   /** Extra request fields, e.g. switching reasoning off for short structured tasks. */
   extra?: Record<string, unknown>;
   /** Output tokens added to every call's own limit for a reasoning model, which reasons before it answers. */
@@ -37,6 +40,111 @@ function reasoningTokensFromEnv(value: string | undefined): number | undefined {
   return Number(value);
 }
 
+/**
+ * 部署时用环境变量登记的额外模型。格式是每行一条 JSON：
+ *
+ *   LLM_EXTRA_MODELS={"my-key":{"service":"deepseek","model":"deepseek-flash","baseUrl":"https://api.deepseek.com/v1","apiKeyEnv":"DEEPSEEK_API_KEY_2","jsonMode":true}}
+ *
+ * 同一家厂家、同一个模型、不同密钥，就登记两条（key 名不同、apiKeyEnv 不同），后台就能分别选。
+ * 密钥本身不写在这里，写 apiKeyEnv 指的环境变量名。
+ */
+export interface ExtraModelSpec {
+  service: string;
+  model: string;
+  /** 直接写地址；不写就用 baseUrlEnv 指的环境变量。 */
+  baseUrl?: string;
+  baseUrlEnv?: string;
+  /** 密钥放哪个环境变量（推荐）；也可以直接写 apiKey（不推荐，会进日志）。 */
+  apiKeyEnv?: string;
+  apiKey?: string;
+  extra?: Record<string, unknown>;
+  reasoningTokens?: number;
+  jsonMode?: boolean;
+  vision?: boolean;
+}
+
+function extraModelsFromEnv(): Record<string, ExtraModelSpec> {
+  const raw = process.env.LLM_EXTRA_MODELS;
+  if (!raw) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("LLM_EXTRA_MODELS must be a JSON object, e.g. {\"my-key\":{\"service\":\"...\",\"model\":\"...\",\"baseUrl\":\"...\",\"apiKeyEnv\":\"...\"}}");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("LLM_EXTRA_MODELS must be a JSON object keyed by model name");
+  }
+  const out: Record<string, ExtraModelSpec> = {};
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    const spec = value as Partial<ExtraModelSpec>;
+    if (!spec.service || !spec.model) throw new Error(`LLM_EXTRA_MODELS entry "${key}" needs both service and model`);
+    if (!spec.baseUrl && !spec.baseUrlEnv) throw new Error(`LLM_EXTRA_MODELS entry "${key}" needs baseUrl or baseUrlEnv`);
+    if (!spec.apiKeyEnv && !spec.apiKey) throw new Error(`LLM_EXTRA_MODELS entry "${key}" needs apiKeyEnv or apiKey`);
+    out[key] = {
+      service: spec.service,
+      model: spec.model,
+      baseUrl: spec.baseUrl,
+      baseUrlEnv: spec.baseUrlEnv,
+      apiKeyEnv: spec.apiKeyEnv,
+      apiKey: spec.apiKey,
+      extra: spec.extra,
+      reasoningTokens: spec.reasoningTokens,
+      jsonMode: spec.jsonMode !== false,
+      vision: spec.vision === true,
+    };
+  }
+  return out;
+}
+
+/** 环境变量登记的模型的名字（LLM_EXTRA_MODELS 里的键）。读不到时只留空，不报错。 */
+export function extraModelKeys(): Record<string, ExtraModelSpec> {
+  try {
+    return extraModelsFromEnv();
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 环境变量登记的模型，键是登记时用的名字。读不到时只留空，不报错（部署时给的才是准的）。
+ */
+function extraModels(): Record<string, ModelSpec> {
+  let specs: Record<string, ExtraModelSpec>;
+  try {
+    specs = extraModelsFromEnv();
+  } catch {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(specs).map(([key, s]) => [key, {
+    key,
+    service: s.service,
+    model: s.model,
+    baseUrlEnv: s.baseUrlEnv ?? "",
+    apiKeyEnv: s.apiKeyEnv ?? "",
+    // 直接写在登记里的地址与密钥：baseUrl 优先于环境变量。
+    get baseUrl() { return s.baseUrl ?? credential("models", s.baseUrlEnv ?? ""); },
+    get apiKey() { return s.apiKey ?? credential("models", s.apiKeyEnv ?? ""); },
+    get extra() { return s.extra; },
+    get reasoningTokens() { return s.reasoningTokens; },
+    get jsonMode() { return s.jsonMode !== false; },
+    get vision() { return s.vision === true; },
+  }]));
+}
+
+/**
+ * LLM_EXTRA_MODELS 写错时的原因（JSON 语法错、缺字段等）。读不到或写对时是 null。
+ * 后台「可用的模型」列表把它显示出来——写错了却没有任何提示，最难查。
+ */
+export function extraModelsError(): string | null {
+  try {
+    extraModelsFromEnv();
+    return null;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 export const MODELS: Record<string, ModelSpec> = {
   // Read from the environment at call time.
   default: {
@@ -49,6 +157,8 @@ export const MODELS: Record<string, ModelSpec> = {
   },
   // The pack's named presets, each with its own address and key.
   ...Object.fromEntries(Object.entries(PRESETS).map(([key, preset]) => [key, { key, ...preset }])),
+  // Models the deployment registered through the environment.
+  ...extraModels(),
 };
 
 export type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
@@ -164,9 +274,17 @@ export async function chatJson<S extends z.ZodType>(opts: ChatJsonOptions<S>): P
   const spec = MODELS[opts.model];
   if (!spec) throw new Error(`Unknown model ${opts.model}`);
   if (!config.modelCallsEnabled) throw new Error("Model calls are disabled (MODEL_CALLS_ENABLED=false)");
-  const baseUrl = credential("models", spec.baseUrlEnv);
-  const apiKey = credential("models", spec.apiKeyEnv);
-  if (!baseUrl || !apiKey || !spec.model) throw new Error(`Model ${opts.model} is not configured (${spec.baseUrlEnv}, ${spec.apiKeyEnv}${spec.key === "default" ? ", LLM_MODEL" : ""})`);
+  const baseUrl = spec.baseUrl ?? credential("models", spec.baseUrlEnv);
+  const apiKey = spec.apiKey ?? credential("models", spec.apiKeyEnv);
+  if (!baseUrl || !apiKey || !spec.model) {
+    // 说出缺哪一项：环境变量登记的模型报它自己的地址与密钥变量名。
+    const missing = [
+      !spec.model ? "model" : null,
+      !baseUrl ? (spec.baseUrlEnv || "baseUrl") : null,
+      !apiKey ? (spec.apiKeyEnv || "apiKey") : null,
+    ].filter(Boolean).join(", ");
+    throw new Error(`Model ${opts.model} is not configured (missing: ${missing}${spec.key === "default" ? ", LLM_MODEL" : ""})`);
+  }
 
   const temperature = opts.temperature ?? 0.2;
   const maxTokens = Math.max(opts.maxTokens ?? 1500, 512) + (spec.reasoningTokens ?? 0);
