@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { sql } from "@aihot/backend/db";
 import { modelFor } from "@aihot/backend/editorial/models";
-import { chatJson } from "@aihot/backend/providers/llm";
+import { chatJson, extractJson } from "@aihot/backend/providers/llm";
 import type { ClockResult } from "./clock.ts";
 import type { AllocationResult } from "./allocation.ts";
 import type { CycleKey } from "./indicators.ts";
@@ -17,6 +17,33 @@ const InterpSchema = z.object({
   interpretation: z.string(),
   watchpoints: z.array(z.string()),
 });
+
+/**
+ * 模型的回答如果不是 JSON，退回按标签文本读：interpretation: / watchpoints:（每个关注点一行）。
+ */
+export function parseInterpText(text: string): z.infer<typeof InterpSchema> {
+  const lines = text.split(/\r?\n/);
+  const body: string[] = [];
+  const watchpoints: string[] = [];
+  let inWatch = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    const head = line.match(/^(interpretation|watchpoints)\s*[:：]\s*(.*)$/i);
+    if (head) {
+      const key = head[1]!.toLowerCase();
+      inWatch = key === "watchpoints";
+      if (head[2]!.trim()) (inWatch ? watchpoints : body).push(head[2]!.trim());
+      continue;
+    }
+    if (!line) continue;
+    if (inWatch) watchpoints.push(line.replace(/^[-*•\d.、\s]+/, "").trim());
+    else body.push(line);
+  }
+  return {
+    interpretation: body.join("\n").trim() || "（模型没有返回可用的解读文本）",
+    watchpoints: watchpoints.flatMap((w) => w.split(/\n|；|;/).map((s) => s.trim())).filter(Boolean),
+  };
+}
 
 let cached: { version: string; system: string; user: string } | null = null;
 
@@ -140,6 +167,14 @@ export async function composeInterpretation(input: InterpInput, at = beijingToda
     schema: InterpSchema,
     temperature: 0.3,
     maxTokens: 2500,
+    // 推理模型有时不给 JSON；退回按标签读文本。
+    parse: (content) => {
+      try {
+        return extractJson(content);
+      } catch {
+        return parseInterpText(content);
+      }
+    },
   });
   const payload = {
     interpretation: res.data.interpretation,

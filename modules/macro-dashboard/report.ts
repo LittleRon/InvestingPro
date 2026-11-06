@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { sql } from "@aihot/backend/db";
 import { modelFor } from "@aihot/backend/editorial/models";
-import { chatJson } from "@aihot/backend/providers/llm";
+import { chatJson, extractJson } from "@aihot/backend/providers/llm";
 import { BLOCKS, type CountryKey } from "./indicators.ts";
 import { cycleOf, latestOf, yoyOf, type Point } from "./logic.ts";
 
@@ -18,6 +18,38 @@ const PestSchema = z.object({
   technological: z.string(),
   watchpoints: z.array(z.string()),
 });
+
+/**
+ * 模型的回答如果不是 JSON，退回按标签文本读：political: / economic: / social: / technological: /
+ * watchpoints:（每个关注点一行）。有的模型在 JSON 模式下仍会改用这种写法。
+ */
+export function parsePestText(text: string): z.infer<typeof PestSchema> {
+  const lines = text.split(/\r?\n/);
+  const buckets: Record<string, string[]> = { political: [], economic: [], social: [], technological: [], watchpoints: [] };
+  let current: string | null = null;
+  for (const raw of lines) {
+    const line = raw.trim();
+    const head = line.match(/^(political|economic|social|technological|watchpoints)\s*[:：]\s*(.*)$/i);
+    if (head) {
+      const key = head[1]!.toLowerCase();
+      current = key;
+      if (head[2]!.trim()) buckets[key]!.push(head[2]!.trim());
+      continue;
+    }
+    if (current && line) buckets[current]!.push(line);
+  }
+  const joined = (key: string) => buckets[key]!.join("\n").trim();
+  const watchpoints = buckets.watchpoints!
+    .flatMap((w) => w.split(/\n|；|;/).map((s) => s.replace(/^[-*•\d.、\s]+/, "").trim()))
+    .filter(Boolean);
+  return {
+    political: joined("political") || "本日无数据",
+    economic: joined("economic") || "本日无数据",
+    social: joined("social") || "本日无数据",
+    technological: joined("technological") || "本日无数据",
+    watchpoints,
+  };
+}
 
 let cached: { version: string; system: string; user: string } | null = null;
 
@@ -133,6 +165,14 @@ export async function composeReport(scope: CountryKey, at = beijingToday()): Pro
     schema: PestSchema,
     temperature: 0.2,
     maxTokens: 2000,
+    // 推理模型有时不给 JSON；退回按标签读文本。
+    parse: (content) => {
+      try {
+        return extractJson(content);
+      } catch {
+        return parsePestText(content);
+      }
+    },
   });
   const payload = {
     political: res.data.political,

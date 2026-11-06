@@ -86,22 +86,53 @@ export class ModelOutputError extends Error {
   }
 }
 
-function extractJson(text: string): unknown {
+/**
+ * Pulls the JSON object out of a model answer. Models often wrap the object in prose or a Markdown
+ * fence, and prose can itself contain braces, so every "{" is tried as a candidate start and the
+ * braces are matched by depth (ignoring braces inside strings). The first candidate that parses wins.
+ */
+export function extractJson(text: string): unknown {
   let t = text.trim();
-  const fence = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(t);
-  if (fence) t = fence[1]!;
-  const start = t.indexOf("{");
-  const end = t.lastIndexOf("}");
-  if (start === -1 || end === -1) {
-    // Include a preview so the caller can see what the model actually returned.
-    throw new ModelOutputError(`No JSON object in model output (got ${text.length} chars: ${JSON.stringify(text.slice(0, 200))})`);
+  const fence = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(t);
+  if (fence) t = fence[1]!.trim();
+
+  let sawBrace = false;
+  for (let start = t.indexOf("{"); start !== -1; start = t.indexOf("{", start + 1)) {
+    sawBrace = true;
+    // Match braces by depth, ignoring braces inside strings.
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let i = start; i < t.length; i++) {
+      const ch = t[i]!;
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    if (end === -1) continue;
+    const body = t.slice(start, end + 1);
+    try {
+      return JSON.parse(body);
+    } catch {
+      try {
+        return JSON.parse(escapeControlCharsInStrings(body));
+      } catch {
+        // Not valid JSON from here; try the next "{" (the prose may have held a brace pair).
+      }
+    }
   }
-  const body = t.slice(start, end + 1);
-  try {
-    return JSON.parse(body);
-  } catch {
-    return JSON.parse(escapeControlCharsInStrings(body));
-  }
+  const reason = sawBrace ? "Unbalanced or invalid JSON" : "No JSON object";
+  throw new ModelOutputError(`${reason} in model output (got ${text.length} chars: ${JSON.stringify(text.slice(0, 200))})`);
 }
 
 /** Models sometimes emit raw newlines or tabs inside JSON strings (multi-line posts); escape only those. */
@@ -197,24 +228,42 @@ export async function chatJson<S extends z.ZodType>(opts: ChatJsonOptions<S>): P
     },
   );
 
-  const response = receipt.response as { choices?: Array<{ message?: { content?: string; reasoning?: string }; finish_reason?: string }>; usage?: Record<string, unknown> };
+  const response = receipt.response as {
+    choices?: Array<{
+      message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null };
+      finish_reason?: string;
+    }>;
+    usage?: Record<string, unknown>;
+  };
   const choice = response.choices?.[0];
   const message = choice?.message;
-  // Some reasoning models (DeepSeek-R1, QwQ, etc.) put reasoning in message.reasoning
-  // and leave message.content empty or without JSON. Try content first, then reasoning.
-  let content = message?.content ?? "";
-  if (!content.trim() && message?.reasoning) {
-    content = message.reasoning;
+  // Reasoning models (DeepSeek-R1, QwQ, GLM thinking) put their chain of thought in a side field and can
+  // leave the answer empty or wrap it in prose. Try the answer first, then every reasoning field, then
+  // look for a JSON object anywhere in what came back.
+  const candidates = [
+    message?.content ?? "",
+    message?.reasoning_content ?? "",
+    message?.reasoning ?? "",
+  ];
+  // Try each candidate until one parses into the schema.
+  let parsed: z.infer<S> | undefined;
+  let lastError: unknown;
+  for (const candidate of candidates) {
+    if (!candidate.trim()) continue;
+    try {
+      parsed = opts.schema.parse(opts.parse ? opts.parse(candidate) : extractJson(candidate));
+      break;
+    } catch (error) {
+      lastError = error;
+    }
   }
-  let parsed: z.infer<S>;
-  try {
-    parsed = opts.schema.parse(opts.parse ? opts.parse(content) : extractJson(content));
-  } catch (error) {
+  if (parsed === undefined) {
     // Unusable output: record it and let a later attempt pay for a fresh answer. A reasoning model that
     // reasoned up to the output limit leaves an empty or cut-off answer; say so, and where to give it room.
+    const raw = candidates.find((c) => c.trim()) ?? "";
     const detail = choice?.finish_reason === "length"
-      ? `output token limit reached (finish_reason=length): a reasoning model may have spent it reasoning; give it room with ${spec.key === "default" ? "LLM_REASONING_TOKENS" : `reasoningTokens on preset ${spec.key}`}. ${String(error)}`
-      : String(error);
+      ? `output token limit reached (finish_reason=length): a reasoning model may have spent it reasoning; give it room with ${spec.key === "default" ? "LLM_REASONING_TOKENS" : `reasoningTokens on preset ${spec.key}`}. ${String(lastError)}`
+      : `${String(lastError)} (model returned ${raw.length} chars: ${JSON.stringify(raw.slice(0, 200))})`;
     await rejectReceivedResponse(receipt.receiptId, `unusable output: ${detail.slice(0, 500)}`);
     throw new ModelOutputError(`Model ${opts.model} returned unusable output for ${opts.subject}: ${detail.slice(0, 300)}`, receipt.receiptId);
   }

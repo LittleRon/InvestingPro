@@ -101,7 +101,7 @@ function CircularClock({ clock }: { clock: ClockResult }) {
         const end = [cx + Math.cos(a) * (R - len), cy + Math.sin(a) * (R - len)];
         return (
           <line key={i} x1={start[0].toFixed(1)} y1={start[1].toFixed(1)} x2={end[0].toFixed(1)} y2={end[1].toFixed(1)}
-            stroke="currentColor" className={long ? "fill-ink-3" : "fill-ink-4/60"} strokeWidth={long ? 2 : 1} strokeLinecap="round" />
+            stroke="currentColor" className={long ? "stroke-ink-3" : "stroke-ink-4/60"} strokeWidth={long ? 2 : 1} strokeLinecap="round" />
         );
       })}
 
@@ -115,12 +115,12 @@ function CircularClock({ clock }: { clock: ClockResult }) {
       })}
 
       {/* 十字轴虚线 */}
-      <line x1={cx - R} y1={cy} x2={cx + R} y2={cy} stroke="currentColor" className="fill-ink-4/30" strokeWidth={0.75} strokeDasharray="3 3" />
-      <line x1={cx} y1={cy - R} x2={cx} y2={cy + R} stroke="currentColor" className="fill-ink-4/30" strokeWidth={0.75} strokeDasharray="3 3" />
+      <line x1={cx - R} y1={cy} x2={cx + R} y2={cy} stroke="currentColor" className="stroke-ink-4/30" strokeWidth={0.75} strokeDasharray="3 3" />
+      <line x1={cx} y1={cy - R} x2={cx} y2={cy + R} stroke="currentColor" className="stroke-ink-4/30" strokeWidth={0.75} strokeDasharray="3 3" />
 
       {/* 对角线分界虚线（45° 轴） */}
-      <line x1={cx - R * DIAG} y1={cy - R * DIAG} x2={cx + R * DIAG} y2={cy + R * DIAG} stroke="currentColor" className="fill-ink-4/20" strokeWidth={0.5} strokeDasharray="2 4" />
-      <line x1={cx + R * DIAG} y1={cy - R * DIAG} x2={cx - R * DIAG} y2={cy + R * DIAG} stroke="currentColor" className="fill-ink-4/20" strokeWidth={0.5} strokeDasharray="2 4" />
+      <line x1={cx - R * DIAG} y1={cy - R * DIAG} x2={cx + R * DIAG} y2={cy + R * DIAG} stroke="currentColor" className="stroke-ink-4/20" strokeWidth={0.5} strokeDasharray="2 4" />
+      <line x1={cx + R * DIAG} y1={cy - R * DIAG} x2={cx - R * DIAG} y2={cy + R * DIAG} stroke="currentColor" className="stroke-ink-4/20" strokeWidth={0.5} strokeDasharray="2 4" />
 
       {/* 象限标签（对角位置，48% 半径处） */}
       {[
@@ -133,19 +133,19 @@ function CircularClock({ clock }: { clock: ClockResult }) {
           className={`text-[13px] font-semibold tracking-[0.1em] ${cls}`}>{label}</text>
       ))}
 
-      {/* 轴标签（外环外侧） */}
-      <text x={cx + R + 10} y={cy + 4} className="fill-ink-4 text-[11px]">高增长 →</text>
-      <text x={cx - R - 10} y={cy + 4} textAnchor="end" className="fill-ink-4 text-[11px]">← 低增长</text>
-      <text x={cx} y={cy - R - 8} textAnchor="middle" className="fill-ink-4 text-[11px]">↑ 高通胀</text>
-      <text x={cx} y={cy + R + 16} textAnchor="middle" className="fill-ink-4 text-[11px]">低通胀 ↓</text>
+      {/* 轴标签（外环外侧，左右两个用锚点避开边界） */}
+      <text x={cx + R + 6} y={cy + 4} className="fill-ink-4 text-[10px]">高增长 →</text>
+      <text x={cx - R - 6} y={cy + 4} textAnchor="end" className="fill-ink-4 text-[10px]">← 低增长</text>
+      <text x={cx} y={cy - R - 8} textAnchor="middle" className="fill-ink-4 text-[10px]">↑ 高通胀</text>
+      <text x={cx} y={cy + R + 14} textAnchor="middle" className="fill-ink-4 text-[10px]">低通胀 ↓</text>
 
       {/* 指针线（从中心到当前位置） */}
       <line x1={cx} y1={cy} x2={px.toFixed(1)} y2={py.toFixed(1)} stroke="currentColor"
-        className="fill-accent" strokeWidth={1.5} strokeLinecap="round" opacity={0.4} />
+        className="stroke-accent" strokeWidth={1.5} strokeLinecap="round" opacity={0.4} />
       {/* 当前位置外耀 */}
       <circle cx={px.toFixed(1)} cy={py.toFixed(1)} r={10} fill="currentColor" className="fill-accent" opacity={0.15} />
       {/* 当前位置主点 */}
-      <circle cx={px.toFixed(1)} cy={py.toFixed(1)} r={6} fill="currentColor" className="fill-accent" stroke="currentColor" strokeWidth={1.5} className="stroke-bg" />
+      <circle cx={px.toFixed(1)} cy={py.toFixed(1)} r={6} fill="currentColor" className="fill-accent stroke-bg" strokeWidth={1.5} />
       {/* 中心点 */}
       <circle cx={cx} cy={cy} r={3} fill="currentColor" className="fill-ink-4" />
     </svg>
