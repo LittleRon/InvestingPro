@@ -1,7 +1,8 @@
 // /dashboard/allocation：动态组合策略配置。输入总资产、当前持仓、时效范围，展示规则引擎算出的
 // 各资产大类基线权重 + 金额。配置保存在服务器（挂管理员账户，不做读者账户）。AI 解读通过按钮触发，
 // 读者打开页面不自动调模型（项目规则）。
-import { useLoaderData, useFetcher } from "react-router";
+import { useLoaderData } from "react-router";
+import { useState, useEffect } from "react";
 import { cachedPage, loadOr404, pageHeaders } from "@aihot/web/lib/api.server";
 import { pageReuse } from "@aihot/web/lib/page-reuse";
 import { pageMeta } from "@aihot/web/lib/seo";
@@ -11,7 +12,6 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 import type { AllocationResult, Horizon } from "../allocation.ts";
 import { HORIZONS } from "../allocation.ts";
 import type { ClockResult } from "../clock.ts";
-import { IconChart } from "@aihot/web/components/icons";
 
 export const handle: Screen = { tab: "dashboard", name: "组合配置" };
 export { pageHeaders as headers };
@@ -44,6 +44,8 @@ interface InterpretationResponse {
   };
 }
 
+interface AdminMe { name: string; csrf: string; dev: boolean }
+
 export async function loader({ request }: { request: Request }) {
   const [alloc, interpRaw] = await Promise.all([
     loadOr404<AllocationResponse>("/api/site/dashboard/allocation", { signal: request.signal }),
@@ -69,11 +71,30 @@ export default function AllocationPage() {
   const { clock, allocation, cycles, horizons } = loaderData.data;
   const interpretation = loaderData.interpretation as InterpretationResponse | null;
 
-  /** 保存配置的 fetcher（客户端提交，不整页刷新）。 */
-  const saveFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  // CSRF token：公开页面没有 admin-layout 的 loader，直接从 /api/admin/me 取（和 report-now.tsx 一致）。
+  const [admin, setAdmin] = useState<AdminMe | null>(null);
+  const [adminChecked, setAdminChecked] = useState(false);
 
-  /** AI 解读的 fetcher（触发生成）。 */
-  const interpFetcher = useFetcher<{ ok: boolean; error?: string }>();
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/me", { credentials: "same-origin", cache: "no-store" });
+        if (cancelled) return;
+        if (res.ok) setAdmin(await res.json() as AdminMe);
+      } catch { /* not admin */ }
+      if (!cancelled) setAdminChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 保存配置状态
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveMsg, setSaveMsg] = useState("");
+
+  // AI 解读状态
+  const [interpState, setInterpState] = useState<"idle" | "generating" | "done" | "error" | "not-admin">("idle");
+  const [interpMsg, setInterpMsg] = useState("");
 
   const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
   const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
@@ -86,6 +107,61 @@ export default function AllocationPage() {
     cash: allocation.weights.find((w) => w.key === "cash")?.holdings ?? 0,
     gold: allocation.weights.find((w) => w.key === "gold")?.holdings ?? 0,
   };
+
+  const loginLink = `/api/auth/login?return=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+
+  /** 保存配置：收集表单数据，带 CSRF token POST JSON。 */
+  const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!admin) { setSaveState("error"); setSaveMsg("需要管理员登录"); return; }
+    setSaveState("saving");
+    setSaveMsg("");
+    const fd = new FormData(e.currentTarget);
+    const total = Number(fd.get("totalAssets")) || 0;
+    const holdingsObj: Record<string, number> = {};
+    for (const key of ASSET_KEYS) {
+      holdingsObj[key] = Number(fd.get(`holding_${key}`)) || 0;
+    }
+    try {
+      const res = await fetch("/api/admin/macro/allocation", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
+        body: JSON.stringify({ totalAssets: total, holdings: holdingsObj, horizon: "medium" }),
+      });
+      if (res.status === 401) { setSaveState("error"); setSaveMsg("登录状态过期，请重新登录"); return; }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `保存失败（${res.status}）`);
+      setSaveState("saved");
+      setSaveMsg("已保存");
+      setTimeout(() => window.location.reload(), 600);
+    } catch (error) {
+      setSaveState("error");
+      setSaveMsg((error as Error).message);
+    }
+  };
+
+  /** 生成 AI 解读：带 CSRF token POST，入队后立刻返回。 */
+  const handleInterp = async () => {
+    if (!admin) { setInterpState("not-admin"); setInterpMsg("需要管理员登录"); return; }
+    setInterpState("generating");
+    setInterpMsg("正在入队…");
+    try {
+      const res = await fetch("/api/admin/macro/allocation/interpretation", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
+      });
+      if (res.status === 401) { setInterpState("not-admin"); setInterpMsg("登录状态过期，请重新登录"); return; }
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `触发失败（${res.status}）`);
+      setInterpState("done");
+      setInterpMsg("已触发，稍后刷新查看");
+    } catch (error) {
+      setInterpState("error");
+      setInterpMsg((error as Error).message);
+    }
+  };
+
+  const BTN = "rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50";
 
   return (
     <div className="pb-10">
@@ -102,7 +178,7 @@ export default function AllocationPage() {
         <section className="card p-4 sm:p-5">
           <h2 className="text-[15px] font-semibold text-ink">配置输入</h2>
           <p className="mt-1 text-[12px] text-ink-4">修改后点击保存，重新计算配置方案。</p>
-          <saveFetcher.Form method="post" action="/api/admin/macro/allocation" className="mt-4">
+          <form onSubmit={handleSave} className="mt-4">
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <label className="w-24 shrink-0 text-[12.5px] text-ink-3">总资产（元）</label>
@@ -129,13 +205,15 @@ export default function AllocationPage() {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-3">
-              <button type="submit" disabled={saveFetcher.state !== "idle"} className="rounded-full border border-line-soft px-3.5 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:text-accent disabled:opacity-50">
-                保存配置
-              </button>
-              {saveFetcher.data?.ok && <span className="text-[12px] text-accent">已保存</span>}
-              {saveFetcher.data && !saveFetcher.data.ok && <span className="text-[12px] text-hot">保存失败</span>}
+              {admin
+                ? <button type="submit" disabled={saveState === "saving"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>保存配置</button>
+                : <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>登录后保存</a>
+              }
+              {saveState === "saving" && <span className="text-[12px] text-ink-3">正在保存…</span>}
+              {saveState === "saved" && <span className="text-[12px] text-accent">已保存</span>}
+              {saveState === "error" && <span className="text-[12px] text-hot">{saveMsg}</span>}
             </div>
-          </saveFetcher.Form>
+          </form>
         </section>
 
         {/* 三视图对比 */}
@@ -194,13 +272,17 @@ export default function AllocationPage() {
             </span>
           </div>
           {/* 管理员触发按钮 */}
-          <interpFetcher.Form method="post" action="/api/admin/macro/allocation/interpretation" className="mt-3">
-            <button type="submit" disabled={interpFetcher.state !== "idle"} className="rounded-full border border-line-soft px-3.5 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:text-accent disabled:opacity-50">
-              {interpFetcher.state !== "idle" ? "正在生成…" : "生成 AI 解读"}
-            </button>
-          </interpFetcher.Form>
-          {interpFetcher.data?.ok && <span className="ml-3 text-[12px] text-accent">已触发，稍后刷新查看</span>}
-          {interpFetcher.data && !interpFetcher.data.ok && <span className="ml-3 text-[12px] text-hot">触发失败</span>}
+          <div className="mt-3">
+            {admin
+              ? <button type="button" onClick={handleInterp} disabled={interpState === "generating"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>
+                  {interpState === "generating" ? "正在生成…" : "生成 AI 解读"}
+                </button>
+              : <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>登录后生成解读</a>
+            }
+            {interpState === "done" && <span className="ml-3 text-[12px] text-accent">已触发，稍后刷新查看</span>}
+            {interpState === "error" && <span className="ml-3 text-[12px] text-hot">{interpMsg}</span>}
+            {interpState === "not-admin" && <span className="ml-3 text-[12px] text-ink-4">{interpMsg}</span>}
+          </div>
           {/* 解读正文 */}
           {interpretation && (
             <div className="mt-4 space-y-3">

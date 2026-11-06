@@ -1,12 +1,13 @@
-// /dashboard/clock：中国版美林投资时钟。增长轴（PMI 趋势）× 通胀轴（PPI×0.6 + CPI×0.4）的
-// 四象限图，标当前位置；政策维度（货币松紧 + 财政积极/收缩）单独指示；各资产大类阶段适配分条形展示；
-// 「该做 / 不该做」清单每条带分。纯计算、零模型成本。方法论与局限在页面底部标注。
+// /dashboard/clock：中国版美林投资时钟。增长轴（PMI 趋势）× 通胀轴（PPI×0.6 + CPI×0.4）映射为
+// 圆形时钟——12 点为顶（高通胀）、3 点为右（高增长）、6 点为底（低通胀）、9 点为左（低增长），
+// 四个象限按 45° 边界划分，当前位置用指针标出。政策维度（货币松紧 + 财政积极/收缩）单独指示；
+// 各资产大类阶段适配分条形展示；「该做 / 不该做」清单每条带分。纯计算、零模型成本。方法论与局限在
+// 页面底部标注。
 import { useLoaderData } from "react-router";
 import { cachedPage, loadOr404, pageHeaders } from "@aihot/web/lib/api.server";
 import { pageReuse } from "@aihot/web/lib/page-reuse";
 import { pageMeta } from "@aihot/web/lib/seo";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
-import { EmptyState } from "@aihot/web/components/ui/Page";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import type { ClockResult, AssetKey } from "../clock.ts";
@@ -29,90 +30,157 @@ export function meta() {
   });
 }
 
-/** 象限的中文标签与坐标位置（用于在 2×2 图上标注）。 */
-const QUAD_POS: Record<string, { x: number; y: number; label: string }> = {
-  recovery: { x: 0.75, y: 0.78, label: "复苏" },
-  overheat: { x: 0.25, y: 0.78, label: "过热" },
-  stagflation: { x: 0.25, y: 0.22, label: "滞胀" },
-  recession: { x: 0.75, y: 0.22, label: "衰退" },
-};
+/**
+ * 圆形美林投资时钟。坐标映射：
+ *   增长轴 → 水平方向（左低右高）：g = clamp(growthTrend/4, -1, 1)
+ *   通胀轴 → 垂直方向（上高下低）：infl = clamp(inflation/6, -1, 1)
+ *   位置 = (g, infl)，投影到圆上（半径 RIMG），用指针标出当前位置。
+ *   四个象限沿 45° 对角线划分：复苏（右下 315°→360°/0°）、过热（右上 45°→135°）、
+ *   滞胀（左上 135°→225°）、衰退（左下 225°→315°）。
+ */
+const DIAG = Math.SQRT1_2;
 
-/** 资产分条形图的颜色。 */
-const BAR_TONES: Record<AssetKey, string> = {
-  stocks: "text-hot",
-  bonds: "text-accent",
-  commodities: "text-ink-3",
-  cash: "text-ink-4",
-  gold: "text-amber",
-};
+function CircularClock({ clock }: { clock: ClockResult }) {
+  const W = 440;
+  const H = 440;
+  const cx = 220;
+  const cy = 220;
+  const R = 168; // 外环半径
+  const RIMG = 130; // 指针最大长度（单位圆映射半径）
 
-/** 2×2 象限图：增长轴水平（左低右高），通胀轴垂直（上高下低）。当前位置用圆点标出。 */
-function QuadrantChart({ clock }: { clock: ClockResult }) {
-  const W = 560;
-  const H = 420;
-  const PAD = 40;
-  const innerW = W - PAD * 2;
-  const innerH = H - PAD * 2;
-  const cx = PAD + innerW * 0.5;
-  const cy = PAD + innerH * 0.5;
-  // 当前位置：growth trend 映射到水平（-4→0, +4→1），inflation 映射到垂直（+6→0.5, -6→1.5）。
-  const g = Math.max(-1, Math.min(1, clock.growth.trend / 4));
-  const infl = Math.max(-1, Math.min(1, clock.inflation.value / 6));
-  // x: 0（左）到 1（右）；y: 0（上）到 1（下）。高通胀在上。
-  const px = cx + g * (innerW / 2 - 8);
-  const py = cy - infl * (innerH / 2 - 8);
+  // 当前位置计算
+  const g = Number.isFinite(clock.growth.trend) ? Math.max(-1, Math.min(1, clock.growth.trend / 4)) : 0;
+  const infl = Number.isFinite(clock.inflation.value) ? Math.max(-1, Math.min(1, clock.inflation.value / 6)) : 0;
+  const mag = Math.hypot(g, infl);
+  const gc = mag > 1 ? g / mag : g;
+  const ic = mag > 1 ? infl / mag : infl;
+  const px = cx + gc * RIMG;
+  const py = cy - ic * RIMG;
+
+  // 用弧度坐标直接画扇形
+  function arcSector(r1: number, r2: number, r = R): string {
+    const p1 = [cx + Math.cos(r1) * r, cy - Math.sin(r1) * r];
+    const p2 = [cx + Math.cos(r2) * r, cy - Math.sin(r2) * r];
+    const largeArc = Math.abs(r2 - r1) > Math.PI ? 1 : 0;
+    return `M ${cx} ${cy} L ${p1[0].toFixed(1)} ${p1[1].toFixed(1)} A ${r} ${r} 0 ${largeArc} 1 ${p2[0].toFixed(1)} ${p2[1].toFixed(1)} Z`;
+  }
+
+  // 四个象限扇形（45° 对角线边界）：单位圆上四个角坐标
+  // 复苏（右下）：(DIAG, -DIAG)，角度 -45° = 315°
+  // 过热（右上）：(DIAG, DIAG)，角度 45°
+  // 滞胀（左上）：(-DIAG, DIAG)，角度 135°
+  // 衰退（左下）：(-DIAG, -DIAG)，角度 225°
+
+  // 角度（度数）转弧度
+  const degToRad = (d: number) => (d * Math.PI) / 180;
+
+  // 象限扇形边界角度（以 atan2 为基准，0°=右，90°=上，180°=左，270°=下）
+  // 复苏：270° → 360°/0°（右下）
+  // 过热：0° → 90°（右上）
+  // 滞胀：90° → 180°（左上）
+  // 衰退：180° → 270°（左下）
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="美林投资时钟四象限">
-      {/* 象限背景 */}
-      <rect x={PAD} y={PAD} width={innerW / 2} height={innerH / 2} fill="currentColor" className="text-bg-sunk" />
-      <rect x={PAD + innerW / 2} y={PAD} width={innerW / 2} height={innerH / 2} fill="currentColor" className="text-bg-sunk dark:text-bg-muted" />
-      <rect x={PAD} y={PAD + innerH / 2} width={innerW / 2} height={innerH / 2} fill="currentColor" className="text-bg-sunk dark:text-bg-muted" />
-      <rect x={PAD + innerW / 2} y={PAD + innerH / 2} width={innerW / 2} height={innerH / 2} fill="currentColor" className="text-bg-sunk" />
-      {/* 分割线 */}
-      <line x1={cx} y1={PAD} x2={cx} y2={H - PAD} stroke="currentColor" className="text-line" strokeWidth={1.5} />
-      <line x1={PAD} y1={cy} x2={W - PAD} y2={cy} stroke="currentColor" className="text-line" strokeWidth={1.5} />
-      {/* 零轴（荣枯线 / 通胀中值） */}
-      <line x1={cx} y1={cy} x2={cx + 30} y2={cy} stroke="currentColor" className="text-ink-4" strokeWidth={1} strokeDasharray="2 2" />
-      <line x1={cx} y1={cy} x2={cx} y2={cy - 30} stroke="currentColor" className="text-ink-4" strokeWidth={1} strokeDasharray="2 2" />
-      {/* 象限标签 */}
-      {Object.entries(QUAD_POS).map(([key, pos]) => (
-        <text key={key} x={(PAD + innerW) * pos.x} y={(PAD + innerH) * pos.y} textAnchor="middle" className="fill-ink-3 text-[15px] font-semibold">
-          {pos.label}
-        </text>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="美林投资时钟圆形表">
+      {/* 四象限扇形区域 */}
+      <path d={arcSector(degToRad(270), degToRad(360))} fill="currentColor" className="fill-accent/8" />
+      <path d={arcSector(degToRad(0), degToRad(90))} fill="currentColor" className="fill-amber/8" />
+      <path d={arcSector(degToRad(90), degToRad(180))} fill="currentColor" className="fill-ink-4/8" />
+      <path d={arcSector(degToRad(180), degToRad(270))} fill="currentColor" className="fill-hot/8" />
+
+      {/* 外环 */}
+      <circle cx={cx} cy={cy} r={R} fill="none" stroke="currentColor" className="stroke-line" strokeWidth={1.5} />
+      <circle cx={cx} cy={cy} r={R - 6} fill="none" stroke="currentColor" className="stroke-line/50" strokeWidth={0.75} strokeDasharray="2 3" />
+
+      {/* 12 只刻度线（时钟风格） */}
+      {Array.from({ length: 12 }).map((_, i) => {
+        const a = degToRad(i * 30 - 90); // 从 12 点开始顺时针
+        const long = i % 3 === 0;
+        const len = long ? 12 : 6;
+        const start = [cx + Math.cos(a) * R, cy + Math.sin(a) * R];
+        const end = [cx + Math.cos(a) * (R - len), cy + Math.sin(a) * (R - len)];
+        return (
+          <line key={i} x1={start[0].toFixed(1)} y1={start[1].toFixed(1)} x2={end[0].toFixed(1)} y2={end[1].toFixed(1)}
+            stroke="currentColor" className={long ? "fill-ink-3" : "fill-ink-4/60"} strokeWidth={long ? 2 : 1} strokeLinecap="round" />
+        );
+      })}
+
+      {/* 四个主象限标记点（3/6/9/12 点的大块） */}
+      {[0, 90, 180, 270].map((angle) => {
+        const a = degToRad(angle);
+        return (
+          <circle key={angle} cx={(cx + Math.cos(a) * (R - 22)).toFixed(1)} cy={(cy + Math.sin(a) * (R - 22)).toFixed(1)}
+            r={4} fill="currentColor" className="fill-ink-3" />
+        );
+      })}
+
+      {/* 十字轴虚线 */}
+      <line x1={cx - R} y1={cy} x2={cx + R} y2={cy} stroke="currentColor" className="fill-ink-4/30" strokeWidth={0.75} strokeDasharray="3 3" />
+      <line x1={cx} y1={cy - R} x2={cx} y2={cy + R} stroke="currentColor" className="fill-ink-4/30" strokeWidth={0.75} strokeDasharray="3 3" />
+
+      {/* 对角线分界虚线（45° 轴） */}
+      <line x1={cx - R * DIAG} y1={cy - R * DIAG} x2={cx + R * DIAG} y2={cy + R * DIAG} stroke="currentColor" className="fill-ink-4/20" strokeWidth={0.5} strokeDasharray="2 4" />
+      <line x1={cx + R * DIAG} y1={cy - R * DIAG} x2={cx - R * DIAG} y2={cy + R * DIAG} stroke="currentColor" className="fill-ink-4/20" strokeWidth={0.5} strokeDasharray="2 4" />
+
+      {/* 象限标签（对角位置，48% 半径处） */}
+      {[
+        { gx: DIAG, gy: -DIAG, label: "复 苏", cls: "fill-accent/50" },
+        { gx: DIAG, gy: DIAG, label: "过 热", cls: "fill-amber/50" },
+        { gx: -DIAG, gy: DIAG, label: "滞 胀", cls: "fill-ink-4/60" },
+        { gx: -DIAG, gy: -DIAG, label: "衰 退", cls: "fill-hot/50" },
+      ].map(({ gx, gy, label, cls }) => (
+        <text key={label} x={cx + gx * R * 0.48} y={cy - gy * R * 0.48 + 5} textAnchor="middle"
+          className={`text-[13px] font-semibold tracking-[0.1em] ${cls}`}>{label}</text>
       ))}
-      {/* 当前位置 */}
-      <circle cx={px} cy={py} r={9} fill="currentColor" className="text-accent" />
-      <circle cx={px} cy={py} r={9} fill="none" stroke="currentColor" className="text-accent" strokeWidth={2} opacity={0.4} />
-      {/* 轴标签 */}
-      <text x={cx} y={H - PAD + 24} textAnchor="middle" className="fill-ink-4 text-[11px]">高增长 →</text>
-      <text x={cx} y={PAD - 12} textAnchor="middle" className="fill-ink-4 text-[11px]">← 高通胀</text>
-      <text x={cx + innerW / 2 - 8} y={cy - 6} textAnchor="end" className="fill-ink-4 text-[10px]">高通胀 ↑</text>
-      <text x={PAD + 8} y={cy - 6} className="fill-ink-4 text-[10px]">低通胀 ↑</text>
-      <text x={PAD + innerW / 2 - 8} y={cy + innerH / 2 - 6} textAnchor="end" className="fill-ink-4 text-[10px]">低通胀 ↓</text>
-      <text x={PAD + 8} y={cy + innerH / 2 - 6} className="fill-ink-4 text-[10px]">低通胀 ↓</text>
+
+      {/* 轴标签（外环外侧） */}
+      <text x={cx + R + 10} y={cy + 4} className="fill-ink-4 text-[11px]">高增长 →</text>
+      <text x={cx - R - 10} y={cy + 4} textAnchor="end" className="fill-ink-4 text-[11px]">← 低增长</text>
+      <text x={cx} y={cy - R - 8} textAnchor="middle" className="fill-ink-4 text-[11px]">↑ 高通胀</text>
+      <text x={cx} y={cy + R + 16} textAnchor="middle" className="fill-ink-4 text-[11px]">低通胀 ↓</text>
+
+      {/* 指针线（从中心到当前位置） */}
+      <line x1={cx} y1={cy} x2={px.toFixed(1)} y2={py.toFixed(1)} stroke="currentColor"
+        className="fill-accent" strokeWidth={1.5} strokeLinecap="round" opacity={0.4} />
+      {/* 当前位置外耀 */}
+      <circle cx={px.toFixed(1)} cy={py.toFixed(1)} r={10} fill="currentColor" className="fill-accent" opacity={0.15} />
+      {/* 当前位置主点 */}
+      <circle cx={px.toFixed(1)} cy={py.toFixed(1)} r={6} fill="currentColor" className="fill-accent" stroke="currentColor" strokeWidth={1.5} className="stroke-bg" />
+      {/* 中心点 */}
+      <circle cx={cx} cy={cy} r={3} fill="currentColor" className="fill-ink-4" />
     </svg>
   );
 }
 
 /** 资产大类适配分条形图。 */
+const BAR_TONES_COLOR: Record<AssetKey, string> = {
+  stocks: "bg-hot",
+  bonds: "bg-accent",
+  commodities: "bg-amber",
+  cash: "bg-ink-4",
+  gold: "bg-yellow-500",
+};
+
 function ScoreBars({ scores }: { scores: { key: AssetKey; name: string; score: number }[] }) {
   const sorted = [...scores].sort((a, b) => b.score - a.score);
   return (
     <div className="space-y-2.5">
-      {sorted.map((s) => (
-        <div key={s.key} className="flex items-center gap-2.5">
-          <span className="w-20 shrink-0 text-[12.5px] text-ink-3">{s.name}</span>
-          <div className="relative h-6 flex-1 overflow-hidden rounded-md bg-bg-sunk dark:bg-bg-muted">
-            <div
-              className={`flex h-full items-center justify-end rounded-md px-2 ${BAR_TONES[s.key]}`}
-              style={{ width: `${Math.max(8, (s.score / 100) * 100)}%` }}
-            >
-              <span className="text-[11px] font-medium text-white dark:text-bg">{s.score.toFixed(0)}</span>
+      {sorted.map((s) => {
+        const w = Math.max(10, (s.score / 100) * 100);
+        return (
+          <div key={s.key} className="flex items-center gap-2.5">
+            <span className="w-20 shrink-0 text-[12.5px] text-ink-3">{s.name}</span>
+            <div className="relative h-5 flex-1 overflow-hidden rounded-md bg-bg-sunk dark:bg-bg-muted">
+              <div
+                className={`flex h-full items-center justify-end rounded-md px-2 ${BAR_TONES_COLOR[s.key]}/25`}
+                style={{ width: `${w}%` }}
+              >
+                <span className="text-[11px] font-medium text-ink">{s.score.toFixed(0)}</span>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -206,7 +274,7 @@ export default function ClockPage() {
             </span>
           </div>
           <div className="mt-4">
-            <QuadrantChart clock={clock} />
+            <CircularClock clock={clock} />
           </div>
         </section>
 
