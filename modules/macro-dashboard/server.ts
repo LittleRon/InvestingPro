@@ -425,6 +425,9 @@ export default defineServerModule({
     // 后台"运行"页的任务清单：本模块的定时任务由 cron 登记，队列任务在这里补上自己的名字。
     currentJobs: async () => ["macro.report-now", "macro.interp"],
   },
+  // 队列任务：worker 只监听模块在这里登记的队列（workModuleQueues 遍历 m.queues）。
+  // 不登记的话任务会入队但没人消费，管理员点按钮后只会等到超时。
+  queues: [REPORT_NOW_QUEUE, INTERP_QUEUE],
   // 每天先采集再写报告，报告写的是采集完当天的快照。报告任务自己先采一轮（stale 机制
   // 保证不重复取），这样即使 06:30 的采集还没跑完或失败，06:40 的报告也不会因数据不足被跳过。
   schedules: [
