@@ -92,7 +92,10 @@ function extractJson(text: string): unknown {
   if (fence) t = fence[1]!;
   const start = t.indexOf("{");
   const end = t.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new ModelOutputError("No JSON object in model output");
+  if (start === -1 || end === -1) {
+    // Include a preview so the caller can see what the model actually returned.
+    throw new ModelOutputError(`No JSON object in model output (got ${text.length} chars: ${JSON.stringify(text.slice(0, 200))})`);
+  }
   const body = t.slice(start, end + 1);
   try {
     return JSON.parse(body);
@@ -194,15 +197,22 @@ export async function chatJson<S extends z.ZodType>(opts: ChatJsonOptions<S>): P
     },
   );
 
-  const response = receipt.response as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: Record<string, unknown> };
-  const content = response.choices?.[0]?.message?.content ?? "";
+  const response = receipt.response as { choices?: Array<{ message?: { content?: string; reasoning?: string }; finish_reason?: string }>; usage?: Record<string, unknown> };
+  const choice = response.choices?.[0];
+  const message = choice?.message;
+  // Some reasoning models (DeepSeek-R1, QwQ, etc.) put reasoning in message.reasoning
+  // and leave message.content empty or without JSON. Try content first, then reasoning.
+  let content = message?.content ?? "";
+  if (!content.trim() && message?.reasoning) {
+    content = message.reasoning;
+  }
   let parsed: z.infer<S>;
   try {
     parsed = opts.schema.parse(opts.parse ? opts.parse(content) : extractJson(content));
   } catch (error) {
     // Unusable output: record it and let a later attempt pay for a fresh answer. A reasoning model that
     // reasoned up to the output limit leaves an empty or cut-off answer; say so, and where to give it room.
-    const detail = response.choices?.[0]?.finish_reason === "length"
+    const detail = choice?.finish_reason === "length"
       ? `output token limit reached (finish_reason=length): a reasoning model may have spent it reasoning; give it room with ${spec.key === "default" ? "LLM_REASONING_TOKENS" : `reasoningTokens on preset ${spec.key}`}. ${String(error)}`
       : String(error);
     await rejectReceivedResponse(receipt.receiptId, `unusable output: ${detail.slice(0, 500)}`);

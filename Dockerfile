@@ -2,8 +2,10 @@
 # Build arg NPM_REGISTRY switches the npm registry (e.g. https://registry.npmmirror.com in mainland China).
 FROM node:24-trixie-slim AS base
 WORKDIR /app
+# 切换到阿里云 apt 镜像源（Debian 13 trixie 用 .sources 格式），国内构建大幅提速。
 # pg_dump for the optional database backups (Debian's client matches the PostgreSQL 17 server in compose).
-RUN apt-get update \
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
  && apt-get install -y --no-install-recommends postgresql-client ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 

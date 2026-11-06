@@ -146,11 +146,12 @@ export default function AllocationPage() {
     setInterpState("generating");
     setInterpMsg("正在入队…");
     try {
-      const res = await fetch("/api/admin/macro/allocation/interpretation", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
-      });
+    const res = await fetch("/api/admin/macro/allocation/interpretation", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
+      body: "{}",
+    });
       if (res.status === 401) { setInterpState("not-admin"); setInterpMsg("登录状态过期，请重新登录"); return; }
       if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `触发失败（${res.status}）`);
       setInterpState("done");

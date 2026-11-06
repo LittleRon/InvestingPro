@@ -81,7 +81,7 @@ function CircularClock({ clock }: { clock: ClockResult }) {
   // 衰退：180° → 270°（左下）
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="美林投资时钟圆形表">
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[300px] mx-auto" role="img" aria-label="美林投资时钟圆形表">
       {/* 四象限扇形区域 */}
       <path d={arcSector(degToRad(270), degToRad(360))} fill="currentColor" className="fill-accent/8" />
       <path d={arcSector(degToRad(0), degToRad(90))} fill="currentColor" className="fill-amber/8" />
