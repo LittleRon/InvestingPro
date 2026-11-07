@@ -35,10 +35,14 @@ export function useAdminAction() {
       keys.current.set(label, key);
       setPending(label);
       try {
+        // 没有 body 时不要声明 JSON：Fastify 的 JSON parser 会把空 body 判为 400，
+        // 全局错误处理回 "The request could not be processed."，DELETE 之类无参命令会全部失败。
+        const headers: Record<string, string> = { "x-csrf-token": me.csrf, "idempotency-key": key };
+        if (body !== undefined) headers["content-type"] = "application/json";
         const res = await fetch(path, {
           method,
           credentials: "same-origin",
-          headers: { "content-type": "application/json", "x-csrf-token": me.csrf, "idempotency-key": key },
+          headers,
           body: body === undefined ? undefined : JSON.stringify(body),
         });
         if (res.status === 401) {

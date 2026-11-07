@@ -9,42 +9,17 @@ import { pageMeta } from "@aihot/web/lib/seo";
 import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
-import type { AllocationResult, Horizon } from "../allocation.ts";
 import { HORIZONS } from "../allocation.ts";
-import type { ClockResult } from "../clock.ts";
+import { safeAllocation, safeInterpretation, type SafeAllocationData, type SafeInterpretation } from "../normalize.ts";
 
 export const handle: Screen = { tab: "dashboard", name: "组合配置" };
 export { pageHeaders as headers };
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
-interface AllocationResponse {
-  clock: ClockResult;
-  cycles: { key: string; phase: "rising" | "falling" | null }[];
-  allocation: AllocationResult;
-  horizons: Record<Horizon, AllocationResult>;
-}
-
-interface InterpretationResponse {
-  scope: string;
-  at: string;
-  model: string | null;
-  generation: number;
-  regeneratedAt: string | null;
-  payload: {
-    interpretation: string;
-    watchpoints: string[];
-    snapshot: {
-      quadrant: string;
-      cycles: string;
-      shortWeights: string;
-      mediumWeights: string;
-      longWeights: string;
-      holdings: string;
-      totalAssets: string;
-      notes: string[];
-    };
-  };
-}
+// 页面只用规范化后的形状：渲染体里读的每一级字段都保证存在，
+// 接口返回旧数据或部分字段时不会在 SSR 抛 TypeError 变成整页 500。
+type AllocationResponse = SafeAllocationData;
+type InterpretationResponse = SafeInterpretation;
 
 /** 生成状态：有没有在跑、服务器上的解读是不是比客户端这份新。 */
 interface InterpStatus {
@@ -58,14 +33,13 @@ interface InterpStatus {
 interface AdminMe { name: string; csrf: string; dev: boolean }
 
 export async function loader({ request }: { request: Request }) {
-  const [alloc, interpRaw] = await Promise.all([
-    loadOr404<AllocationResponse>("/api/site/dashboard/allocation", { signal: request.signal }),
-    loadOr404<InterpretationResponse | { missing: string }>("/api/site/dashboard/allocation/interpretation", { signal: request.signal }).catch(() => null),
+  const [allocRaw, interpRaw] = await Promise.all([
+    loadOr404<unknown>("/api/site/dashboard/allocation", { signal: request.signal }),
+    loadOr404<unknown>("/api/site/dashboard/allocation/interpretation", { signal: request.signal }).catch(() => null),
   ]);
-  const interpretation = interpRaw && !("missing" in interpRaw) ? interpRaw : null;
   return cachedPage(300, {
-    data: alloc,
-    interpretation,
+    data: safeAllocation(allocRaw),
+    interpretation: safeInterpretation(interpRaw),
   });
 }
 
@@ -112,8 +86,8 @@ export default function AllocationPage() {
           cache: "no-store",
         });
         if (!res.ok || cancelled) return;
-        const fresh = await res.json() as InterpretationResponse | { missing: string };
-        if (cancelled || !fresh || "missing" in fresh || !fresh.payload) return;
+        const fresh = safeInterpretation(await res.json());
+        if (cancelled || !fresh) return;
         setInterpretation((prev) => (!prev || fresh.generation >= prev.generation ? fresh : prev));
       } catch { /* 网络抖动，用 SSR 那份 */ }
     })();
@@ -131,6 +105,10 @@ export default function AllocationPage() {
   const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
   const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
 
+  // 解读快照统一取一份带默认值的，渲染 <pre> 时不再对任何一级字段解引用。
+  const interpSnapshot = interpretation?.payload?.snapshot ?? {
+    quadrant: "", cycles: "", shortWeights: "", mediumWeights: "", longWeights: "", holdings: "", totalAssets: "", notes: [],
+  };
   const totalAssets = allocation.totalAssets;
   const holdings = {
     stocks: allocation.weights.find((w) => w.key === "stocks")?.holdings ?? 0,
@@ -214,11 +192,11 @@ export default function AllocationPage() {
         if (!res.ok) continue;
         const status = await res.json() as InterpStatus;
         if (status.generation > base) {
-          const fresh = await (await fetch("/api/site/dashboard/allocation/interpretation", {
+          const fresh = safeInterpretation(await (await fetch("/api/site/dashboard/allocation/interpretation", {
             credentials: "same-origin",
             cache: "no-store",
-          })).json() as InterpretationResponse;
-          if (fresh?.payload) {
+          })).json());
+          if (fresh) {
             setInterpretation(fresh);
             setInterpState("done");
             setInterpMsg(`已生成第 ${fresh.generation} 版`);
@@ -381,13 +359,13 @@ export default function AllocationPage() {
           {interpretation && (
             <div className="mt-4 space-y-3">
               <div className="text-[13px] leading-[1.8] text-ink-2 whitespace-pre-wrap">
-                {interpretation.payload.interpretation}
+                {interpretation.payload?.interpretation ?? ""}
               </div>
-              {interpretation.payload.watchpoints.length > 0 && (
+              {(interpretation.payload?.watchpoints?.length ?? 0) > 0 && (
                 <div>
                   <h3 className="mb-1.5 text-[12.5px] font-semibold text-ink-3">关注点</h3>
                   <ul className="space-y-1">
-                    {interpretation.payload.watchpoints.map((w, i) => (
+                    {(interpretation.payload?.watchpoints ?? []).map((w, i) => (
                       <li key={i} className="flex items-start gap-2 text-[12.5px] text-ink-3">
                         <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-accent" />
                         {w}
@@ -399,23 +377,23 @@ export default function AllocationPage() {
               <details className="mt-2">
                 <summary className="text-[12px] text-ink-4 hover:text-ink-3">查看解读依据（数据快照）</summary>
                 <pre className="mt-2 overflow-x-auto rounded-md bg-bg-sunk dark:bg-bg-muted p-3 text-[11px] leading-[1.6] text-ink-4">
-{interpretation.payload.snapshot.quadrant}
+{interpSnapshot.quadrant}
 
-{interpretation.payload.snapshot.cycles}
+{interpSnapshot.cycles}
 
 短期权重：
-{interpretation.payload.snapshot.shortWeights}
+{interpSnapshot.shortWeights}
 
 中期权重：
-{interpretation.payload.snapshot.mediumWeights}
+{interpSnapshot.mediumWeights}
 
 长期权重：
-{interpretation.payload.snapshot.longWeights}
+{interpSnapshot.longWeights}
 
 当前持仓：
-{interpretation.payload.snapshot.holdings}
+{interpSnapshot.holdings}
 
-总资产：{interpretation.payload.snapshot.totalAssets} 元
+总资产：{interpSnapshot.totalAssets} 元
                 </pre>
               </details>
             </div>

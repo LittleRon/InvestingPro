@@ -65,3 +65,38 @@ test("「检查登录状态」在登录成功后会离开，按钮不会永远�
     "/api/admin/me 返回 200 后必须切到 ready");
   assert.match(text, /phase === "checking"[^\n]*disabled/, "checking 时按钮确实置灰");
 });
+
+/** 声明了 application/json 却没有 body 的请求会被 Fastify 判 400，全局错误处理回
+ * "The request could not be processed."，按钮看起来就是点了没反应。 */
+test("声明 JSON 的 POST/PATCH/PUT/DELETE 都必须带 body", () => {
+  for (const file of [
+    "modules/macro-dashboard/web/report-now.tsx",
+    "modules/macro-dashboard/web/allocation.tsx",
+    "apps/web/app/features/admin/action.ts",
+  ]) {
+    const lines = read(file).split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!/content-type.*application\/json/.test(lines[i]!)) continue;
+      // 同一个 fetch 调用块里，headers 前后 12 行内必须出现 body（或该头是条件追加的）。
+      const window = lines.slice(Math.max(0, i - 12), i + 13).join("\n");
+      const conditional = /headers\["content-type"\]|body !== undefined/.test(window);
+      assert.ok(/\bbody:/.test(window) || conditional,
+        `${file}:${i + 1} 声明了 JSON 却没有 body（会 400）`);
+    }
+  }
+});
+
+test("报告页与组合配置页的 loader 都先规范化再交给渲染体", () => {
+  const alloc = read("modules/macro-dashboard/web/allocation.tsx");
+  const report = read("modules/macro-dashboard/web/report.tsx");
+  assert.match(alloc, /safeAllocation\(/, "组合配置 loader 必须收敛配置数据");
+  assert.match(alloc, /safeInterpretation\(/, "组合配置 loader 必须收敛解读数据");
+  assert.match(report, /safeReport\(/, "报告页 loader 必须收敛报告数据");
+  // hydration 后拉取的解读同样要规范化，否则旧数据会在客户端崩。
+  assert.ok((alloc.match(/safeInterpretation\(/g) ?? []).length >= 2,
+    "hydration / 轮询拿到的解读也必须规范化");
+  assert.doesNotMatch(report, /report\.payload\.watchpoints\.length/,
+    "渲染体不能再直接对未守卫的 payload 取 length");
+  assert.doesNotMatch(alloc, /interpretation\.payload\.snapshot\./,
+    "解读快照要统一走带默认值的局部变量");
+});

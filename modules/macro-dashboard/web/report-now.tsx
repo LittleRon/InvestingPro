@@ -43,10 +43,13 @@ export function ReportNowButton({ scope, label = "立即编写今天" }: { scope
     setMessage("正在入队…");
     try {
       const me = await (await fetch("/api/admin/me", { credentials: "same-origin", cache: "no-store" })).json() as AdminMe;
+      // 声明了 JSON 就必须带 body：Fastify 的 JSON parser 遇到空 body 会抛 400，
+      // 全局错误处理会回 "The request could not be processed."，按钮看起来就是「点了没反应」。
       const res = await fetch(`/api/admin/macro/report?scope=${scope}`, {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json", "x-csrf-token": me.csrf },
+        body: "{}",
       });
       if (res.status === 401) { setPhase("not-admin"); setMessage("登录状态过期了，请重新登录"); return; }
       if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `提交失败（${res.status}）`);

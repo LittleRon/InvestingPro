@@ -17,6 +17,7 @@ import { fredConfigured } from "./collect/fred.ts";
 import { marketProvider } from "./collect/market.ts";
 import { composeReport, latestReport } from "./report.ts";
 import { composeInterpretation, latestInterpretation } from "./interpretation.ts";
+import { safeInterpretation, safeReport } from "./normalize.ts";
 
 const DAY_MS = 86_400_000;
 const CACHE_CONTROL = "public, max-age=300, s-maxage=300";
@@ -129,7 +130,10 @@ function sendJson(req: FastifyRequest, reply: FastifyReply, body: unknown, etagP
   const text = JSON.stringify(body);
   const etag = weakEtag(etagPrefix, text);
   reply.header("ETag", etag).header("Cache-Control", CACHE_CONTROL).header("Vary", "Accept-Encoding");
-  const match = (req.headers["if-none-match"] ?? "").split(",").some((t) => t.trim().replace(/^W\//, "") === etag.replace(/^W\//, ""));
+  // 多值头可能是数组；直接 .split 会抛 TypeError，变成一次 503。
+  const rawTag = req.headers["if-none-match"] ?? "";
+  const tags = Array.isArray(rawTag) ? rawTag.join(",") : String(rawTag);
+  const match = tags.split(",").some((t) => t.trim().replace(/^W\//, "") === etag.replace(/^W\//, ""));
   if (match) return reply.code(304).send();
   return reply.header("Content-Type", "application/json; charset=utf-8").send(text);
 }
@@ -331,7 +335,8 @@ export default defineServerModule({
       // 诊断：报告为什么还没有——最近一次任务的状态（数据不足被跳过、模型报错、从未跑过）。
       const status = await reportRunStatus(scope);
       if (report) {
-        sendJson(req, reply, { ...report, status }, "rpt");
+        // 出口就给结构完整的报告：老版本写的记录缺字段时不让任何客户端（含缓存的旧 JS）崩。
+        sendJson(req, reply, safeReport({ ...report, status }), "rpt");
       } else {
         sendJson(req, reply, { scope, at: null, missing: "这一天的报告还没有生成", status }, "rpt");
       }
@@ -351,8 +356,9 @@ export default defineServerModule({
     app.get("/api/site/dashboard/allocation/interpretation", async (req, reply) => {
       reply.header("Cache-Control", "no-store");
       const interp = await latestInterpretation();
+      const safe = safeInterpretation(interp);
       reply.header("Content-Type", "application/json; charset=utf-8")
-        .send(JSON.stringify(interp ?? { missing: "还没有生成解读" }));
+        .send(JSON.stringify(safe ?? { missing: "还没有生成解读" }));
     });
     // AI 解读的生成状态：管理员点按钮后轮询这个接口，知道有没有在跑、跑完了没有。
     // 不缓存——轮询要看到最新的状态，缓存住就永远停在旧值。

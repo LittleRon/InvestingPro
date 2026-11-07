@@ -9,27 +9,15 @@ import { EmptyState } from "@aihot/web/components/ui/Page";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { ReportNowButton } from "./report-now.tsx";
+import { safeReport, type SafeReport } from "../normalize.ts";
 
 export const handle: Screen = { tab: "dashboard", name: "PEST 分析" };
 export { pageHeaders as headers };
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
-interface ReportResponse {
-  scope: string;
-  at: string | null;
-  model?: string | null;
-  payload?: {
-    political: string;
-    economic: string;
-    social: string;
-    technological: string;
-    watchpoints: string[];
-    snapshot: string;
-  };
-  missing?: string;
-  /** 最近一次报告任务的运行记录（job_runs），解释「为什么还没有」。 */
-  status?: { job: string; status: string; at: string; error: string | null; detail: Record<string, unknown> | null } | null;
-}
+// 报告一律用规范化后的形状：渲染体读 payload.watchpoints.length / payload.snapshot 时
+// 不会因为库里留着旧格式记录而抛 TypeError 变整页 500。
+type ReportResponse = SafeReport;
 
 const SCOPE_NAME: Record<string, string> = { CN: "中国", US: "美国" };
 
@@ -56,7 +44,7 @@ export async function loader({ request }: { request: Request }) {
   const query = new URLSearchParams({ scope });
   if (at && /^\d{4}-\d{2}-\d{2}$/.test(at)) query.set("at", at);
   return cachedPage(300, {
-    report: await loadOr404<ReportResponse>(`/api/site/dashboard/report?${query}`, { signal: request.signal }),
+    report: safeReport(await loadOr404<unknown>(`/api/site/dashboard/report?${query}`, { signal: request.signal })),
     scope: scope as "CN" | "US",
   });
 }
@@ -115,15 +103,15 @@ export default function ReportPage() {
                     {q.name}
                   </h3>
                   <p className="mt-1 text-[11px] text-ink-4">{q.note}</p>
-                  <p className="mt-2 text-[13px] leading-[1.85] text-ink-2">{report.payload![q.key]}</p>
+                  <p className="mt-2 text-[13px] leading-[1.85] text-ink-2">{report.payload?.[q.key] ?? "本日无数据"}</p>
                 </section>
               ))}
             </div>
-            {report.payload.watchpoints.length > 0 && (
+            {(report.payload?.watchpoints?.length ?? 0) > 0 && (
               <section aria-label="关注要点" className="mt-4">
                 <h3 className="text-[13.5px] font-semibold text-ink">关注要点</h3>
                 <ul className="mt-2 space-y-1.5 text-[13px] leading-[1.8] text-ink-2">
-                  {report.payload.watchpoints.map((w) => (
+                  {(report.payload?.watchpoints ?? []).map((w) => (
                     <li key={w} className="flex gap-2">
                       <span className="mt-[9px] h-1 w-1 shrink-0 rounded-full bg-ink-4" />
                       <span>{w}</span>
@@ -138,7 +126,7 @@ export default function ReportPage() {
             <summary className="flex cursor-pointer items-center gap-1.5 text-[13.5px] font-semibold text-ink transition-colors hover:text-accent">
               这份报告依据的数据
             </summary>
-            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-[12px] leading-[1.8] text-ink-3">{report.payload.snapshot}</pre>
+            <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-[12px] leading-[1.8] text-ink-3">{report.payload?.snapshot ?? ""}</pre>
           </details>
         </article>
       )}
