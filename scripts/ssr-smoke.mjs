@@ -93,6 +93,22 @@ const CASES = [
     },
   },
   {
+    name: "解读任务失败且内容接口附带运行记录", alloc: allocData,
+    interp: {
+      missing: "还没有生成解读",
+      status: { job: "macro.interp", status: "failed", error: "模型超时", detail: null, startedAt: "2026-11-07T02:30:00.000Z" },
+    },
+    report: {
+      scope: "CN", at: null, missing: "这一天的报告还没有生成",
+      status: { job: "macro.report", status: "failed", error: "模型超时", detail: null, startedAt: "2026-11-07T02:30:00.000Z" },
+    },
+    status: {
+      expectedSeconds: 180, today: "2026-11-07",
+      report: { running: false, lastStatus: "failed", lastError: "模型超时", detail: null, startedAt: "2026-11-07T02:30:00.000Z", at: null, writtenAt: null, hasToday: false },
+      interpretation: { running: false, lastStatus: "failed", lastError: "模型超时", detail: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 0, at: null, hasToday: false, writtenAt: null },
+    },
+  },
+  {
     name: "回来时服务端报告仍在跑但已超 10 分钟（僵尸任务）", alloc: allocData, interp: fullInterp, report: fullReport,
     status: {
       expectedSeconds: 180, today: "2026-11-07",
@@ -114,7 +130,10 @@ const CONTENT_CHECKS = [
   { path: "/dashboard/report", when: "完整数据（有报告 + 有解读）", must: ["政治象限", "关注要点", "原始宏观数据快照"] },
   { path: "/dashboard/allocation", when: "完整数据（有报告 + 有解读）", must: ["这是一段 AI 解读正文。", "查看解读报告"] },
   { path: "/dashboard/allocation/report", when: "完整数据（有报告 + 有解读）", must: ["这是一段 AI 解读正文。", "关注 PPI", "返回组合配置"] },
-  { path: "/dashboard/allocation/report", when: "还没有任何报告 / 解读", must: ["还没有生成 AI 解读报告", "去组合配置生成"] },
+  // 空状态必须和 PEST 报告页对等：能直接生成、能看到任务原因、说明会有进度。
+  { path: "/dashboard/allocation/report", when: "还没有任何报告 / 解读", must: ["还没有生成 AI 解读报告", "检查登录状态…", "预计等待时间和生成进度"] },
+  { path: "/dashboard/allocation/report", when: "解读任务失败且内容接口附带运行记录", must: ["还没有生成 AI 解读报告", "解读任务上次失败：模型超时", "检查登录状态…"] },
+  { path: "/dashboard/report", when: "解读任务失败且内容接口附带运行记录", must: ["还没有这一天的报告", "报告任务上次失败：模型超时", "检查登录状态…"] },
 ];
 
 // 生成状态接口：前端 hydration / 轮询会读它，同样要覆盖各种形状。
@@ -122,7 +141,11 @@ const GENERATION_STATUS = {
   expectedSeconds: 180,
   today: "2026-11-07",
   report: { running: false, lastStatus: "ok", lastError: null, detail: { written: true, reason: null }, startedAt: "2026-11-07T02:30:00.000Z", at: "2026-11-07", writtenAt: "2026-11-07", hasToday: true },
-  interpretation: { running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 2, at: "2026-11-07", hasToday: true },
+  interpretation: {
+    running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z",
+    generation: 2, at: "2026-11-07", hasToday: true,
+    detail: { written: true, reason: null }, writtenAt: "2026-11-07",
+  },
 };
 
 let scenario = CASES[0];

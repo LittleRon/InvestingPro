@@ -2,7 +2,7 @@
 // 渲染体的输入一律先过这一层：结构不完整就退回空状态，绝不 500。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { safeAllocation, safeInterpretation, safeReport, safeJobDetail } from "../normalize.ts";
+import { safeAllocation, safeInterpretation, safeReport, safeReportStatus, safeJobDetail } from "../normalize.ts";
 
 const fullReport = {
   scope: "CN", at: "2026-11-07", model: "default",
@@ -148,6 +148,29 @@ test("报告状态带归一化 detail 与 startedAt，页面能说人话", () =>
   });
   assert.equal(skipped.status?.detail.reason, "只有 3 项数据，不够写报告");
   assert.equal(skipped.status?.startedAt, null);
+});
+
+test("解读与报告共用同一个任务记录形状：detail 是数组也能读出跳过原因", () => {
+  const s = safeReportStatus({
+    job: "macro.interp", status: "ok", at: "2026-11-07", error: null,
+    detail: [{ written: false, reason: "今天已经有解读了", generation: 2 }],
+    startedAt: "2026-11-07T02:30:00.000Z",
+  });
+  assert.equal(s?.job, "macro.interp");
+  assert.equal(s?.detail.written, false);
+  assert.equal(s?.detail.reason, "今天已经有解读了");
+  assert.equal(s?.detail.generation, 2);
+  assert.equal(s?.startedAt, "2026-11-07T02:30:00.000Z");
+});
+
+test("任务记录缺失或畸形时返回 null，空状态不会误报", () => {
+  assert.equal(safeReportStatus(null), null);
+  assert.equal(safeReportStatus("坏值"), null);
+  assert.equal(safeReportStatus({ detail: {} }), null);
+  const s = safeReportStatus({ status: "failed", error: "模型超时", startedAt: "不是时间" });
+  assert.equal(s?.status, "failed");
+  assert.equal(s?.error, "模型超时");
+  assert.equal(s?.startedAt, null, "非法时间不能交给倒计时");
 });
 
 test("组合配置正常数据保留权重数值", () => {

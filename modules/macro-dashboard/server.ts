@@ -42,15 +42,17 @@ interface InterpRun {
  * 「立即编写」：一个后台管理员从前端点按钮，先采集一轮再写一份报告。跑在 worker 的一个
  * 模块队列里（和定时任务分开，互不阻塞）；只有一个人能跑（singleton），重试一次。
  */
-const REPORT_NOW_QUEUE = defineQueue<{ scope: CountryKey }>({
+const REPORT_NOW_QUEUE = defineQueue<{ scope: CountryKey; force?: boolean }>({
   name: "macro.report-now",
   options: { policy: "singleton", retryLimit: 1, expireInSeconds: 3600 },
   worker: { batchSize: 1 },
   run: async (jobs) => recordRun("macro.report-now", async () => {
     const out: ReportNowRun[] = [];
+    // 与解读队列一致：管理员点「再写一次」时带 force，覆盖当天已有的一篇。
+    const force = jobs.some((j) => j.force);
     for (const job of jobs) {
       const summary = await collectIndicators();
-      out.push({ scope: job.scope, collected: summary.points, ...(await composeReport(job.scope)) });
+      out.push({ scope: job.scope, collected: summary.points, ...(await composeReport(job.scope, undefined, force)) });
     }
     return out;
   }),
@@ -348,11 +350,13 @@ export default defineServerModule({
       reply.header("Cache-Control", "no-store");
       const q = (req.query ?? {}) as Record<string, unknown>;
       const scope = isCountry(q.scope) ? q.scope : "CN";
-      const status = await reportRunStatus(scope);
-      const report = await latestReport(scope);
-      const interp = await latestInterpretation();
-      const [interpRun] = await sql<{ status: string; started_at: Date; error: string | null; detail: Record<string, unknown> | null }[]>`
-        SELECT status, started_at, error, detail FROM job_runs WHERE job = 'macro.interp' ORDER BY started_at DESC, id DESC LIMIT 1`;
+      // 报告与解读查的是同一张 job_runs，走同一个格式化函数，字段与口径完全一致。
+      const [status, interpStatus, report, interp] = await Promise.all([
+        reportRunStatus(scope),
+        interpretationRunStatus(),
+        latestReport(scope),
+        latestInterpretation(),
+      ]);
       // worker 崩溃 / 进程被杀会留下永远 'running' 的记录。超过 10 分钟就当它已结束，
       // 否则用户每次回来都看到一个永远转不完的进度条。
       const STALE_MS = 10 * 60 * 1000;
@@ -364,8 +368,8 @@ export default defineServerModule({
       // 北京时间「今天」：报告与解读都按它落库，页面据此判断是不是刚生成的。
       const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
       const reportRunning = status?.status === "running" && fresh(status.startedAt);
-      const interpStartedAt = interpRun ? new Date(interpRun.started_at).toISOString() : null;
-      const interpRunning = interpRun?.status === "running" && fresh(interpStartedAt);
+      const interpStartedAt = interpStatus?.startedAt ?? null;
+      const interpRunning = interpStatus?.status === "running" && fresh(interpStartedAt);
       reply.header("Content-Type", "application/json; charset=utf-8").send(JSON.stringify({
         // 采集 + 一次模型调用通常 30–90 秒，给 3 分钟的预期上限，前端只做「还剩大约多久」的提示。
         expectedSeconds: 180,
@@ -383,12 +387,15 @@ export default defineServerModule({
         },
         interpretation: {
           running: interpRunning,
-          lastStatus: interpRun?.status ?? null,
-          lastError: interpRun?.error ?? null,
+          lastStatus: interpStatus?.status ?? null,
+          lastError: interpStatus?.error ?? null,
           startedAt: interpStartedAt,
           generation: interp?.generation ?? 0,
           at: interp?.at ?? null,
           hasToday: interp?.at === today,
+          // 与报告侧对等：把跳过原因、实际写出的日期一并给页面。
+          detail: interpStatus?.detail ?? null,
+          writtenAt: interp?.at ?? null,
         },
       }));
     });
@@ -406,23 +413,30 @@ export default defineServerModule({
     // 不缓存：管理员重新生成后内容会变，缓存住就一直是旧的（客户端 no-store 挡不住服务端/CDN 缓存）。
     app.get("/api/site/dashboard/allocation/interpretation", async (req, reply) => {
       reply.header("Cache-Control", "no-store");
-      const interp = await latestInterpretation();
+      // 与 PEST 报告接口对等：正文之外附上任务运行记录，页面空状态才能解释
+      // 「为什么还没有」（任务失败 / 数据不够 / 今天已有解读）。
+      const [interp, status] = await Promise.all([
+        latestInterpretation(),
+        interpretationRunStatus(),
+      ]);
       const safe = safeInterpretation(interp);
       reply.header("Content-Type", "application/json; charset=utf-8")
-        .send(JSON.stringify(safe ?? { missing: "还没有生成解读" }));
+        .send(JSON.stringify(safe ? { ...safe, status } : { missing: "还没有生成解读", status }));
     });
-    // AI 解读的生成状态：管理员点按钮后轮询这个接口，知道有没有在跑、跑完了没有。
-    // 不缓存——轮询要看到最新的状态，缓存住就永远停在旧值。
+    // 兼容旧前端的别名：生成状态唯一的数据源是 generation/status 与
+    // interpretationRunStatus()，这里不再另写一份查询，避免两边口径漂移。
     app.get("/api/site/dashboard/allocation/interpretation/status", async (req, reply) => {
       reply.header("Cache-Control", "no-store");
-      const interp = await latestInterpretation();
-      const [run] = await sql<{ status: string; started_at: Date; error: string | null; detail: Record<string, unknown> | null }[]>`
-        SELECT status, started_at, error, detail FROM job_runs WHERE job = 'macro.interp' ORDER BY started_at DESC, id DESC LIMIT 1`;
+      const [interp, status] = await Promise.all([
+        latestInterpretation(),
+        interpretationRunStatus(),
+      ]);
       reply.header("Content-Type", "application/json; charset=utf-8").send(JSON.stringify({
-        running: run?.status === "running",
-        lastStatus: run?.status ?? null,
-        lastError: run?.error ?? null,
-        // 客户端拿自己那份的 generation 来比，变大了就是服务器上有新的。
+        running: status?.status === "running",
+        lastStatus: status?.status ?? null,
+        lastError: status?.error ?? null,
+        detail: status?.detail ?? null,
+        startedAt: status?.startedAt ?? null,
         generation: interp?.generation ?? 0,
         regeneratedAt: interp?.regeneratedAt ?? null,
       }));
@@ -435,8 +449,9 @@ export default defineServerModule({
       if (req.headers["x-csrf-token"] !== admin.csrf) return reply.code(403).send({ detail: "CSRF token 缺失或过期" });
       const q = (req.query ?? {}) as Record<string, unknown>;
       const scope = isCountry(q.scope) ? q.scope : "CN";
+      const body = (req.body ?? {}) as { force?: boolean };
       try {
-        await enqueueReportNow(scope);
+        await enqueueReportNow(scope, body.force === true);
       } catch (error) {
         return reply.code(503).send({ detail: (error as Error).message });
       }
@@ -494,7 +509,7 @@ export default defineServerModule({
   ],
   models: {
     pest: { label: "宏观仪表盘 PEST 分析（政治、经济、社会、技术）", env: "PEST_MODEL", purposes: ["macro_pest"] },
-    allocation_interpretation: { label: "动态组合配置 AI 解读", env: "PEST_MODEL", purposes: ["macro_allocation_interpretation"] },
+    allocation_interpretation: { label: "动态组合配置 AI 解读", env: "ALLOCATION_INTERPRETATION_MODEL", purposes: ["macro_allocation_interpretation"] },
   },
 });
 
@@ -521,8 +536,8 @@ async function composeAfterCollect(scope: CountryKey): Promise<{ collected: numb
  * 管理员的「立即编写」：入队后立刻返回，worker 先采集再写。同一 scope 已有今天的报告
  * 时 composeReport 会跳过（不重复花模型的钱），队列任务本身仍记为 ok。
  */
-async function enqueueReportNow(scope: CountryKey): Promise<void> {
-  const id = await enqueueOn(REPORT_NOW_QUEUE, { scope });
+async function enqueueReportNow(scope: CountryKey, force = false): Promise<void> {
+  const id = await enqueueOn(REPORT_NOW_QUEUE, { scope, force });
   if (!id) throw new Error("队列拒绝了这次立即编写（可能有另一次正在跑）");
 }
 
@@ -536,10 +551,16 @@ async function enqueueInterpretation(force = false): Promise<void> {
  * 最近一次报告任务的运行记录（job_runs），给前端诊断「为什么还没有报告」。
  * 定时任务和「立即编写」队列都算：取两者里最新的一条。
  */
-async function reportRunStatus(scope: CountryKey): Promise<SafeReportStatus | null> {
-  const name = scope === "US" ? "macro.report.us" : "macro.report";
-  const [row] = await sql<{ job: string; status: string; started_at: Date; error: string | null; detail: unknown }[]>`
-    SELECT job, status, started_at, error, detail FROM job_runs WHERE job IN (${name}, 'macro.report-now') ORDER BY started_at DESC, id DESC LIMIT 1`;
+interface RunRow {
+  job: string;
+  status: string;
+  started_at: Date;
+  error: string | null;
+  detail: unknown;
+}
+
+/** 报告与解读的任务记录共用同一个形状，页面才能用同一句话解释「为什么还没生成」。 */
+function toRunStatus(row: RunRow | undefined): SafeReportStatus | null {
   if (!row) return null;
   return {
     job: row.job,
@@ -551,6 +572,20 @@ async function reportRunStatus(scope: CountryKey): Promise<SafeReportStatus | nu
     detail: safeJobDetail(row.detail),
     startedAt: new Date(row.started_at).toISOString(),
   };
+}
+
+async function reportRunStatus(scope: CountryKey): Promise<SafeReportStatus | null> {
+  const name = scope === "US" ? "macro.report.us" : "macro.report";
+  const [row] = await sql<RunRow[]>`
+    SELECT job, status, started_at, error, detail FROM job_runs WHERE job IN (${name}, 'macro.report-now') ORDER BY started_at DESC, id DESC LIMIT 1`;
+  return toRunStatus(row);
+}
+
+/** AI 解读的任务记录：与报告侧完全对等，供解读内容接口和统一状态接口共用。 */
+async function interpretationRunStatus(): Promise<SafeReportStatus | null> {
+  const [row] = await sql<RunRow[]>`
+    SELECT job, status, started_at, error, detail FROM job_runs WHERE job = 'macro.interp' ORDER BY started_at DESC, id DESC LIMIT 1`;
+  return toRunStatus(row);
 }
 
 /** 读取管理员的动态配置（持仓 + 总资产 + 时效范围）。没有记录时返回默认值。 */

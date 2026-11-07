@@ -1,6 +1,8 @@
 // 生成状态以服务端 job_runs 为准，不放在组件本地 state 里。
 // 这样用户跳到别的页面再回来（甚至换台设备、刷新）都能看到真实进度与结果。
+// PEST 报告与 AI 解读共用这一份：两边只有在「读哪个 job」上不同。
 import { useEffect, useState } from "react";
+import type { SafeJobDetail } from "../normalize.ts";
 
 export interface GenerationJobState {
   running: boolean;
@@ -9,12 +11,13 @@ export interface GenerationJobState {
   startedAt: string | null;
   at: string | null;
   hasToday: boolean;
-}
-
-export interface ReportJobState extends GenerationJobState {
-  detail: { written: boolean | null; reason: string | null } | null;
+  /** 任务运行明细（定时任务存对象、队列任务存数组，服务端已统一）。 */
+  detail: SafeJobDetail | null;
+  /** 实际写出的日期；没有就是 null。 */
   writtenAt: string | null;
 }
+
+export interface ReportJobState extends GenerationJobState {}
 
 export interface InterpJobState extends GenerationJobState {
   generation: number;
@@ -45,8 +48,14 @@ export type GenerationKind = "report" | "interpretation";
 /**
  * 页面挂载时恢复生成状态，并在任务进行中持续轮询。
  * 返回的是服务端事实，不是本地猜测：刷新、跳走再回来都能对上。
+ * onChange 传稳定的 setState 即可，父组件据此刷新正文（避免两个组件各轮询一次）。
  */
-export function useGenerationStatus(kind: GenerationKind, scope = "CN", intervalMs = 3_000) {
+export function useGenerationStatus(
+  kind: GenerationKind,
+  scope = "CN",
+  intervalMs = 3_000,
+  onChange?: (status: GenerationStatus) => void,
+) {
   const [status, setStatus] = useState<GenerationStatus | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -55,6 +64,7 @@ export function useGenerationStatus(kind: GenerationKind, scope = "CN", interval
       const next = await loadGenerationStatus(scope);
       if (cancelled || !next) return;
       setStatus(next);
+      onChange?.(next);
       const job = kind === "report" ? next.report : next.interpretation;
       // 任务结束就停止轮询，避免页面一直空转。
       if (!job.running && timer) { clearInterval(timer); timer = null; }
@@ -65,7 +75,7 @@ export function useGenerationStatus(kind: GenerationKind, scope = "CN", interval
       cancelled = true;
       if (timer) clearInterval(timer);
     };
-  }, [kind, scope, intervalMs]);
+  }, [kind, scope, intervalMs, onChange]);
   return status;
 }
 

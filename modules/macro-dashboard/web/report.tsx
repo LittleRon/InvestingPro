@@ -9,7 +9,8 @@ import { EmptyState } from "@aihot/web/components/ui/Page";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { ReportNowButton } from "./report-now.tsx";
-import { safeReport, type SafeReport, type SafeReportStatus } from "../normalize.ts";
+import { safeReport, type SafeReport } from "../normalize.ts";
+import { explainRunStatus } from "../status-text.ts";
 import { useEffect, useState } from "react";
 
 export const handle: Screen = { tab: "dashboard", name: "PEST 分析" };
@@ -22,29 +23,15 @@ type ReportResponse = SafeReport;
 
 const SCOPE_NAME: Record<string, string> = { CN: "中国", US: "美国" };
 
-/** 把报告任务的运行记录说人话（解释「为什么还没有」）。detail 已由服务端归一化。 */
-function explainStatus(status: SafeReportStatus | null): string {
-  if (!status) return "还从未跑过报告任务（检查 worker 是否在跑、定时任务是否注册）。";
-  if (status.status === "running") return "报告任务正在跑，稍等片刻刷新。";
-  if (status.status === "failed") {
-    const reason = status.error ? status.error.split("\n")[0]!.slice(0, 120) : "未知错误";
-    return `报告任务上次失败：${reason}`;
-  }
-  if (status.status === "ok") {
-    if (status.detail.written === false) return status.detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
-    if (status.detail.written === true) return "报告已写出；若这里还没显示，稍等片刻或点下方按钮刷新查看。";
-    return "上次任务已完成，可在下方查看生成进度与结果。";
-  }
-  return `报告任务最近一次状态：${status.status}`;
-}
-
 export async function loader({ request }: { request: Request }) {
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope") === "US" ? "US" : "CN";
   const at = url.searchParams.get("at");
   const query = new URLSearchParams({ scope });
   if (at && /^\d{4}-\d{2}-\d{2}$/.test(at)) query.set("at", at);
-  return cachedPage(300, {
+  // 与 AI 解读报告页一致：内容刚生成就会变，页面 HTML 不缓存；
+  // hydration 后仍会补拉一次，保证拿到最新一篇。
+  return cachedPage(0, {
     report: safeReport(await loadOr404<unknown>(`/api/site/dashboard/report?${query}`, { signal: request.signal })),
     scope: scope as "CN" | "US",
   });
@@ -99,7 +86,7 @@ export default function ReportPage() {
             action={<div className="flex flex-col items-center gap-2"><ReportNowButton scope={scope as "CN" | "US"} /></div>}
           >
             {report.missing ?? "每天 06:40 写一次，采集到足够数据才有。"}
-            <span className="block mt-1 text-ink-3">{explainStatus(report.status ?? null)}</span>
+            <span className="block mt-1 text-ink-3">{explainRunStatus(report.status ?? null, "报告")}</span>
             <span className="block mt-1 text-ink-4">点「立即编写今天」后，这里会显示预计等待时间和生成进度；写好后会自动提示并给出查看入口。</span>
           </EmptyState>
         </div>

@@ -73,12 +73,15 @@ export interface SafeReport {
   status: SafeReportStatus | null;
 }
 
-/** 报告记录：没有 `at` 或 payload 不完整时一律当作「还没有报告」，走空状态而不是崩溃。 */
-export function safeReport(raw: unknown): SafeReport {
-  const r = record(raw);
-  const at = typeof r.at === "string" ? r.at : null;
-  const rs = record(r.status);
-  const status: SafeReportStatus | null = r.status && typeof r.status === "object" && rs.status ? {
+/**
+ * 任务运行记录：PEST 报告与 AI 解读共用。
+ * 报告的 status 嵌在报告响应里，解读的 status 嵌在解读响应里，形状完全一样，
+ * 页面才能用同一份文案解释「为什么还没有」。
+ */
+export function safeReportStatus(raw: unknown): SafeReportStatus | null {
+  const rs = record(raw);
+  if (!raw || typeof raw !== "object" || !rs.status) return null;
+  return {
     job: str(rs.job),
     status: str(rs.status),
     at: str(rs.at),
@@ -86,7 +89,14 @@ export function safeReport(raw: unknown): SafeReport {
     // 队列任务的 detail 是数组，定时任务是对象；统一后页面才不会误判「没写出报告」。
     detail: safeJobDetail(rs.detail),
     startedAt: dateText(rs.startedAt),
-  } : null;
+  };
+}
+
+/** 报告记录：没有 `at` 或 payload 不完整时一律当作「还没有报告」，走空状态而不是崩溃。 */
+export function safeReport(raw: unknown): SafeReport {
+  const r = record(raw);
+  const at = typeof r.at === "string" ? r.at : null;
+  const status = safeReportStatus(r.status);
   const base: SafeReport = {
     scope: str(r.scope, "CN"),
     at,

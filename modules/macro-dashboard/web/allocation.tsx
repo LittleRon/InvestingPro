@@ -10,8 +10,8 @@ import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { HORIZONS } from "../allocation.ts";
 import { safeAllocation, safeInterpretation, type SafeAllocationData, type SafeInterpretation } from "../normalize.ts";
-import { GenerationProgress } from "./generation-progress.tsx";
-import { interpWritten, loadGenerationStatus, phaseFromStatus, useGenerationStatus } from "./use-generation-status.ts";
+import { InterpretationNowButton } from "./report-now.tsx";
+import { interpWritten, type GenerationStatus } from "./use-generation-status.ts";
 
 export const handle: Screen = { tab: "dashboard", name: "组合配置" };
 export { pageHeaders as headers };
@@ -92,16 +92,11 @@ export default function AllocationPage() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveMsg, setSaveMsg] = useState("");
 
-  // AI 解读状态：以服务端 job_runs 为准，刷新或跳走再回来都能恢复。
-  const serverStatus = useGenerationStatus("interpretation", "CN");
-  const derived = phaseFromStatus(serverStatus, "interpretation");
-  const [interpSubmitting, setInterpSubmitting] = useState(false);
-  const [interpSubmitError, setInterpSubmitError] = useState<string | null>(null);
-  const [interpSubmittedHere, setInterpSubmittedHere] = useState(false);
-  const [interpForce, setInterpForce] = useState(false);
-  // 服务端出现更新的一版时，把正文换成最新的（不整页刷新，页面有缓存）。
+  // 生成状态由共用的生成按钮从服务端同步回来；本页只负责把最新正文换上去，
+  // 不再自己轮询一次、也不再重复实现登录检查与进度。
+  const [interpServerStatus, setInterpServerStatus] = useState<GenerationStatus | null>(null);
   useEffect(() => {
-    if (!serverStatus || !interpWritten(serverStatus, baseGeneration.current)) return;
+    if (!interpServerStatus || !interpWritten(interpServerStatus, baseGeneration.current)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -115,11 +110,7 @@ export default function AllocationPage() {
       } catch { /* 网络抖动，保留现有正文 */ }
     })();
     return () => { cancelled = true; };
-  }, [serverStatus]);
-  const interpState = interpSubmitting ? "submitting"
-    : interpSubmitError ? "failed"
-    : (derived.phase === "done" && !interpSubmittedHere) ? "idle"
-    : derived.phase;
+  }, [interpServerStatus]);
 
   const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
   const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
@@ -170,35 +161,6 @@ export default function AllocationPage() {
     } catch (error) {
       setSaveState("error");
       setSaveMsg((error as Error).message);
-    }
-  };
-
-  /**
-   * 生成 AI 解读：带 CSRF token POST，入队后立刻返回。
-   * 不再自己轮询——useGenerationStatus 持续跟服务端同步，跳走再回来也能恢复。
-   * force=true 时覆盖同一天原来那条（重新生成）。
-   */
-  const handleInterp = async (force: boolean) => {
-    if (!admin) { setInterpSubmitError("需要管理员登录"); return; }
-    setInterpForce(force);
-    setInterpSubmitting(true);
-    setInterpSubmitError(null);
-    try {
-      const res = await fetch("/api/admin/macro/allocation/interpretation", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
-        body: JSON.stringify(force ? { force: true } : {}),
-      });
-      if (res.status === 401) { setInterpSubmitError("登录状态过期，请重新登录"); return; }
-      if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `触发失败（${res.status}）`);
-      setInterpSubmittedHere(true);
-      // 立刻拉一次，让进度条不用等下一个轮询周期。
-      await loadGenerationStatus("CN");
-    } catch (error) {
-      setInterpSubmitError((error as Error).message);
-    } finally {
-      setInterpSubmitting(false);
     }
   };
 
@@ -315,20 +277,9 @@ export default function AllocationPage() {
             </span>
           </div>
           {/* 管理员触发按钮 + 查看解读报告（与 PEST 报告的「查看报告」对齐） */}
+          {/* 生成按钮与 PEST 报告共用同一组件：登录检查、进度、完成引导、失败重试完全一致 */}
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            {admin
-              ? <>
-                  <button type="button" onClick={() => handleInterp(false)} disabled={interpState === "submitting" || interpState === "running"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>
-                    {interpState === "submitting" || interpState === "running" ? "生成中…" : interpretation ? "重新生成" : "生成 AI 解读"}
-                  </button>
-                  {interpretation && interpState !== "submitting" && interpState !== "running" && (
-                    <button type="button" onClick={() => handleInterp(true)} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>
-                      强制覆盖生成
-                    </button>
-                  )}
-                </>
-              : <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>登录后生成解读</a>
-            }
+            <InterpretationNowButton onStatus={setInterpServerStatus} />
             {interpretation && (
               // 普通链接整页跳转，避开 SPA 页面复用缓存；不带日期，报告页按最新一版展示。
               <a href="/dashboard/allocation/report" className={`${BTN} border-accent/40 text-accent hover:bg-accent/10`}>
@@ -336,16 +287,6 @@ export default function AllocationPage() {
               </a>
             )}
           </div>
-          {/* 进度 / 完成提示 / 失败原因：状态来自服务端，跳走再回来也能恢复 */}
-          <GenerationProgress
-            phase={interpState}
-            startedAt={derived.startedAt}
-            expectedSeconds={derived.expectedSeconds}
-            message={interpSubmitError ?? derived.message}
-            view={{ href: "/dashboard/allocation/report", label: "查看 AI 解读报告" }}
-            readyView={derived.hasToday ? { href: "/dashboard/allocation/report", label: "查看今天的 AI 解读报告", message: "今天的解读已经生成好，可以直接查看。" } : undefined}
-            onRetry={() => handleInterp(interpForce)}
-          />
           {interpretation && interpretation.regeneratedAt && (
             <p className="mt-2 text-[11.5px] text-ink-4">
               最后一次重新生成：{new Date(interpretation.regeneratedAt).toLocaleString("zh-CN", { hour12: false })}

@@ -147,12 +147,16 @@ export interface StoredReport {
   };
 }
 
-/** 生成并入库。数据不够就根本不叫模型，免得写一份没有依据的报告。 */
-export async function composeReport(scope: CountryKey, at = beijingToday()): Promise<{ written: boolean; reason?: string }> {
+/**
+ * 生成并入库。数据不够就根本不叫模型，免得写一份没有依据的报告。
+ * force 为真时覆盖当天已有的一篇（管理员点「再写一次」），与 AI 解读的 force 完全对等；
+ * 定时任务不传 force，仍然靠 existing 判断避免重复写。
+ */
+export async function composeReport(scope: CountryKey, at = beijingToday(), force = false): Promise<{ written: boolean; reason?: string }> {
   const { text, count } = await snapshotOf(scope, at);
   if (count < 4) return { written: false, reason: `只有 ${count} 项数据，不够写报告` };
   const [existing] = await sql<{ at: Date }[]>`SELECT at FROM macro_reports WHERE scope = ${scope} AND at = ${at}`;
-  if (existing) return { written: false, reason: "这一天已经有报告了" };
+  if (existing && !force) return { written: false, reason: "这一天已经有报告了" };
   const p = prompt();
   const model = await modelFor("pest");
   const res = await chatJson({
@@ -184,7 +188,7 @@ export async function composeReport(scope: CountryKey, at = beijingToday()): Pro
   };
   await sql`INSERT INTO macro_reports (scope, at, model, payload)
     VALUES (${scope}, ${at}, ${model}, ${JSON.stringify(payload)}::jsonb)
-    ON CONFLICT (scope, at) DO NOTHING`;
+    ON CONFLICT (scope, at) DO UPDATE SET model = EXCLUDED.model, payload = EXCLUDED.payload`;
   return { written: true };
 }
 

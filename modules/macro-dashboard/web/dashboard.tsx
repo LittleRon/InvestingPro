@@ -13,6 +13,7 @@ import type { Screen } from "@aihot/web/components/shell/screens";
 import { CYCLES, type CountryKey, type CycleKey } from "../indicators.ts";
 import { LineChart, LineLegend, fmtValue, type Line } from "./chart.tsx";
 import { ReportNowButton } from "./report-now.tsx";
+import { explainRunStatus } from "../status-text.ts";
 
 export const handle: Screen = { tab: "dashboard", name: "仪表盘" };
 export { pageHeaders as headers };
@@ -58,22 +59,6 @@ export function meta() {
 }
 
 const TONES = ["text-accent", "text-hot", "text-ink-3", "text-ink-4"];
-
-/** 把报告任务的运行记录说人话（解释「为什么还没有报告」）。 */
-function explainReportStatus(status: NonNullable<DashboardResponse["reportStatus"]>): string {
-  if (status.status === "running") return "报告任务正在跑，稍等片刻刷新。";
-  if (status.status === "failed") {
-    const reason = status.error ? status.error.split("\n")[0]!.slice(0, 120) : "未知错误";
-    return `报告任务上次失败：${reason}`;
-  }
-  if (status.status === "ok") {
-    // detail 已由服务端归一化：队列任务存的是数组，之前当对象读会误报「没写出报告」。
-    if (status.detail.written === false) return status.detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
-    if (status.detail.written === true) return "报告已写出，点右侧「查看报告」即可阅读。";
-    return "上次任务已完成，可查看今天生成的报告。";
-  }
-  return `报告任务最近一次状态：${status.status}`;
-}
 
 function toLines(series: { key: string; name: string; points: { at: string; value: number }[] }[]): Line[] {
   return series.map((s, i) => ({ key: s.key, name: s.name, tone: TONES[i % TONES.length]!, points: s.points }));
@@ -422,7 +407,7 @@ export default function DashboardPage() {
             ) : (
               <>
                 报告还没有生成（每天 06:40 写一次，采集到足够数据才有）。
-                {!data.latestReport && data.reportStatus && <span className="block mt-1 text-ink-3">{explainReportStatus(data.reportStatus)}</span>}
+                {!data.latestReport && <span className="block mt-1 text-ink-3">{explainRunStatus(data.reportStatus, "报告")}</span>}
               </>
             )}
           </p>

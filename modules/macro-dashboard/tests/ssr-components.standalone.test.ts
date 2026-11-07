@@ -111,12 +111,12 @@ test("报告接口与生成状态接口都不缓存，生成完立刻能看到�
   assert.match(server, /safeJobDetail\(row\.detail\)/, "任务 detail 必须在服务端归一化");
 });
 
-test("生成进度与完成引导：报告按钮、组合配置页都用同一个进度组件", () => {
+test("生成进度与完成引导：报告与解读都走同一个按钮与进度组件", () => {
   const btn = read("modules/macro-dashboard/web/report-now.tsx");
   const alloc = read("modules/macro-dashboard/web/allocation.tsx");
   const progress = read("modules/macro-dashboard/web/generation-progress.tsx");
-  assert.match(btn, /GenerationProgress/, "报告按钮要显示进度");
-  assert.match(alloc, /GenerationProgress/, "AI 解读要显示进度");
+  assert.match(btn, /GenerationProgress/, "通用按钮要显示进度");
+  assert.match(alloc, /InterpretationNowButton/, "AI 解读复用同一个按钮，进度自然对等");
   assert.match(progress, /role="progressbar"/, "要有进度条");
   assert.match(progress, /预计还需|已超过预计时间/, "要有倒计时文案");
   assert.match(progress, /报告已经生成好了/, "完成后要主动提示");

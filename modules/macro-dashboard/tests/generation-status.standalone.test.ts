@@ -14,11 +14,13 @@ const status = (over: Partial<GenerationStatus> = {}): GenerationStatus => ({
   today: "2026-11-07",
   report: {
     running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z",
-    at: "2026-11-07", hasToday: true, detail: { written: true, reason: null }, writtenAt: "2026-11-07",
+    at: "2026-11-07", hasToday: true,
+    detail: { written: true, reason: null, collected: null, generation: null }, writtenAt: "2026-11-07",
   },
   interpretation: {
     running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z",
     generation: 2, at: "2026-11-07", hasToday: true,
+    detail: { written: true, reason: null, collected: null, generation: null }, writtenAt: "2026-11-07",
   },
   ...over,
 });
@@ -70,13 +72,20 @@ test("解读 generation 变大或今天已有，都说明写出了新的正文",
   assert.equal(interpWritten(null, 0), false);
 });
 
-test("两个页面都用服务端 hook，不再把进度存在组件本地 state", () => {
+test("报告与解读共用同一个生成按钮，状态只由服务端驱动", () => {
   const btn = read("modules/macro-dashboard/web/report-now.tsx");
   const alloc = read("modules/macro-dashboard/web/allocation.tsx");
-  assert.match(btn, /useGenerationStatus\("report"/, "报告按钮要跟服务端状态同步");
-  assert.match(alloc, /useGenerationStatus\("interpretation"/, "AI 解读要跟服务端状态同步");
+  const interp = read("modules/macro-dashboard/web/interpretation-report.tsx");
+  const report = read("modules/macro-dashboard/web/report.tsx");
+  assert.match(btn, /kind: GenerationKind/, "同一组件覆盖报告与解读两种任务");
+  assert.match(btn, /useGenerationStatus\(kind/, "统一轮询服务端状态");
+  assert.match(btn, /export function ReportNowButton/);
+  assert.match(btn, /export function InterpretationNowButton/);
+  assert.match(report, /<ReportNowButton\b/, "PEST 报告页能直接生成");
+  assert.match(alloc, /<InterpretationNowButton\b/, "组合配置页用同一个按钮");
+  assert.match(interp, /<InterpretationNowButton\b/, "解读报告页也能直接生成");
   assert.doesNotMatch(btn, /pollUntilWritten/, "不再有页面内的本地轮询循环");
-  assert.doesNotMatch(alloc, /pollForNewInterp/, "不再有页面内的本地轮询循环");
+  assert.doesNotMatch(alloc, /pollForNewInterp|handleInterp/, "解读侧不再有第二套实现");
 });
 
 test("查看报告链接不带精确日期，且用普通链接整页跳转", () => {
@@ -96,4 +105,13 @@ test("服务端状态接口有僵尸 running 超时保护与今日标记", () =>
   assert.match(server, /STALE_MS/, "崩溃残留的 running 记录不能让进度条永远转");
   assert.match(server, /hasToday: report\?\.at === today/, "报告要告诉页面今天是否已有");
   assert.match(server, /hasToday: interp\?\.at === today/, "解读要告诉页面今天是否已有");
+});
+
+test("报告与解读的任务记录走同一个格式化函数，字段完全对等", () => {
+  const server = read("modules/macro-dashboard/server.ts");
+  assert.match(server, /function toRunStatus/, "两种任务的 detail / startedAt 口径要一致");
+  assert.match(server, /async function interpretationRunStatus/, "解读也有对等的任务记录查询");
+  assert.match(server, /detail: interpStatus\?\.detail/, "统一状态接口要给解读侧失败/跳过原因");
+  assert.match(server, /writtenAt: interp\?\.at/, "解读侧也要给出实际写出的日期");
+  assert.match(server, /\{ \.\.\.safe, status \}/, "解读内容接口和报告接口一样附带任务记录");
 });
