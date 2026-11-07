@@ -2,7 +2,7 @@
 # Offline deployment for servers that cannot reach GitHub.
 #
 # Writes the verified runtime files directly (no string matching, no git history needed).
-# Safe to re-run. Generated from commit 7e40eac.
+# Safe to re-run. Generated from commit e165f32 (runtime files; works on any older checkout).
 #
 #   scp offline-fix-all.sh ubuntu@SERVER:~/InvestingPro/
 #   cd ~/InvestingPro && bash offline-fix-all.sh
@@ -24,4 +24,8 @@ for rel, encoded in FILES.items():
     print("wrote", rel)
 PY
 echo "完成。现在必须重建镜像：sudo docker compose up -d --build"
-echo "验证：git log -1 --oneline 与硬刷新 /dashboard/allocation、/dashboard/report"
+echo "验证修复是否到位（本脚本直接覆盖文件，git log 不会变，这是正常的）："
+echo "  grep -c 'body: \"{}\"' modules/macro-dashboard/web/report-now.tsx        # 应为 1"
+echo "  grep -c 'safeInterpretation' modules/macro-dashboard/web/allocation.tsx  # 应 >= 2"
+echo "  ls modules/macro-dashboard/normalize.ts                                  # 应存在"
+echo "然后硬刷新 /dashboard/allocation 与 /dashboard/report。"
