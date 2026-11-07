@@ -353,25 +353,42 @@ export default defineServerModule({
       const interp = await latestInterpretation();
       const [interpRun] = await sql<{ status: string; started_at: Date; error: string | null; detail: Record<string, unknown> | null }[]>`
         SELECT status, started_at, error, detail FROM job_runs WHERE job = 'macro.interp' ORDER BY started_at DESC, id DESC LIMIT 1`;
+      // worker 崩溃 / 进程被杀会留下永远 'running' 的记录。超过 10 分钟就当它已结束，
+      // 否则用户每次回来都看到一个永远转不完的进度条。
+      const STALE_MS = 10 * 60 * 1000;
+      const fresh = (iso: string | null | undefined) => {
+        if (!iso) return false;
+        const t = Date.parse(iso);
+        return Number.isFinite(t) && Date.now() - t < STALE_MS;
+      };
+      // 北京时间「今天」：报告与解读都按它落库，页面据此判断是不是刚生成的。
+      const today = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+      const reportRunning = status?.status === "running" && fresh(status.startedAt);
+      const interpStartedAt = interpRun ? new Date(interpRun.started_at).toISOString() : null;
+      const interpRunning = interpRun?.status === "running" && fresh(interpStartedAt);
       reply.header("Content-Type", "application/json; charset=utf-8").send(JSON.stringify({
         // 采集 + 一次模型调用通常 30–90 秒，给 3 分钟的预期上限，前端只做「还剩大约多久」的提示。
         expectedSeconds: 180,
+        today,
         report: {
-          running: status?.status === "running",
+          running: reportRunning,
           lastStatus: status?.status ?? null,
           lastError: status?.error ?? null,
           detail: status?.detail ?? null,
           startedAt: status?.startedAt ?? null,
           at: report?.at ?? null,
           writtenAt: report?.at ?? null,
+          // 今天已有报告：页面一加载就能给出「查看今天的报告」入口，不必等用户原地守着。
+          hasToday: report?.at === today,
         },
         interpretation: {
-          running: interpRun?.status === "running",
+          running: interpRunning,
           lastStatus: interpRun?.status ?? null,
           lastError: interpRun?.error ?? null,
-          startedAt: interpRun ? new Date(interpRun.started_at).toISOString() : null,
+          startedAt: interpStartedAt,
           generation: interp?.generation ?? 0,
           at: interp?.at ?? null,
+          hasToday: interp?.at === today,
         },
       }));
     });

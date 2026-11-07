@@ -2,16 +2,16 @@
 // 各资产大类基线权重 + 金额。配置保存在服务器（挂管理员账户，不做读者账户）。AI 解读通过按钮触发，
 // 读者打开页面不自动调模型（项目规则）。
 import { useLoaderData, useLocation } from "react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { cachedPage, loadOr404, pageHeaders } from "@aihot/web/lib/api.server";
 import { pageReuse } from "@aihot/web/lib/page-reuse";
 import { pageMeta } from "@aihot/web/lib/seo";
-import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { HORIZONS } from "../allocation.ts";
 import { safeAllocation, safeInterpretation, type SafeAllocationData, type SafeInterpretation } from "../normalize.ts";
-import { GenerationProgress, type GenerationPhase } from "./generation-progress.tsx";
+import { GenerationProgress } from "./generation-progress.tsx";
+import { interpWritten, loadGenerationStatus, phaseFromStatus, useGenerationStatus } from "./use-generation-status.ts";
 
 export const handle: Screen = { tab: "dashboard", name: "组合配置" };
 export { pageHeaders as headers };
@@ -21,21 +21,6 @@ export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 // 接口返回旧数据或部分字段时不会在 SSR 抛 TypeError 变成整页 500。
 type AllocationResponse = SafeAllocationData;
 type InterpretationResponse = SafeInterpretation;
-
-/** /api/site/dashboard/generation/status 里解读那一侧的字段。 */
-interface InterpStatus {
-  running: boolean;
-  lastStatus: string | null;
-  lastError: string | null;
-  startedAt: string | null;
-  generation: number;
-  at: string | null;
-}
-
-interface GenerationStatusResponse {
-  expectedSeconds: number;
-  interpretation: InterpStatus;
-}
 
 interface AdminMe { name: string; csrf: string; dev: boolean }
 
@@ -66,6 +51,8 @@ export default function AllocationPage() {
   const [interpretation, setInterpretation] = useState<InterpretationResponse | null>(
     loaderData.interpretation as InterpretationResponse | null,
   );
+  // 服务端 generation 超过这个基准就说明写出了新的一版，把正文换掉。
+  const baseGeneration = useRef(interpretation?.generation ?? 0);
 
   // CSRF token：公开页面没有 admin-layout 的 loader，直接从 /api/admin/me 取（和 report-now.tsx 一致）。
   const [admin, setAdmin] = useState<AdminMe | null>(null);
@@ -105,12 +92,34 @@ export default function AllocationPage() {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveMsg, setSaveMsg] = useState("");
 
-  // AI 解读状态
-  const [interpState, setInterpState] = useState<GenerationPhase | "not-admin">("idle");
-  const [interpMsg, setInterpMsg] = useState("");
-  const [interpStartedAt, setInterpStartedAt] = useState<number | null>(null);
-  const [interpExpected, setInterpExpected] = useState(180);
+  // AI 解读状态：以服务端 job_runs 为准，刷新或跳走再回来都能恢复。
+  const serverStatus = useGenerationStatus("interpretation", "CN");
+  const derived = phaseFromStatus(serverStatus, "interpretation");
+  const [interpSubmitting, setInterpSubmitting] = useState(false);
+  const [interpSubmitError, setInterpSubmitError] = useState<string | null>(null);
+  const [interpSubmittedHere, setInterpSubmittedHere] = useState(false);
   const [interpForce, setInterpForce] = useState(false);
+  // 服务端出现更新的一版时，把正文换成最新的（不整页刷新，页面有缓存）。
+  useEffect(() => {
+    if (!serverStatus || !interpWritten(serverStatus, baseGeneration.current)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/site/dashboard/allocation/interpretation", { credentials: "same-origin", cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const fresh = safeInterpretation(await res.json());
+        if (fresh && !cancelled) {
+          baseGeneration.current = fresh.generation;
+          setInterpretation(fresh);
+        }
+      } catch { /* 网络抖动，保留现有正文 */ }
+    })();
+    return () => { cancelled = true; };
+  }, [serverStatus]);
+  const interpState = interpSubmitting ? "submitting"
+    : interpSubmitError ? "failed"
+    : (derived.phase === "done" && !interpSubmittedHere) ? "idle"
+    : derived.phase;
 
   const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
   const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
@@ -166,15 +175,14 @@ export default function AllocationPage() {
 
   /**
    * 生成 AI 解读：带 CSRF token POST，入队后立刻返回。
+   * 不再自己轮询——useGenerationStatus 持续跟服务端同步，跳走再回来也能恢复。
    * force=true 时覆盖同一天原来那条（重新生成）。
-   * 入队后轮询状态接口，服务器上出现更新的解读就刷新页面，读者自动看到最新一版。
    */
   const handleInterp = async (force: boolean) => {
-    if (!admin) { setInterpState("not-admin"); setInterpMsg("需要管理员登录"); return; }
+    if (!admin) { setInterpSubmitError("需要管理员登录"); return; }
     setInterpForce(force);
-    setInterpState("submitting");
-    setInterpStartedAt(Date.now());
-    setInterpMsg(force ? "正在提交重新生成…" : "正在提交…");
+    setInterpSubmitting(true);
+    setInterpSubmitError(null);
     try {
       const res = await fetch("/api/admin/macro/allocation/interpretation", {
         method: "POST",
@@ -182,62 +190,16 @@ export default function AllocationPage() {
         headers: { "content-type": "application/json", "x-csrf-token": admin.csrf },
         body: JSON.stringify(force ? { force: true } : {}),
       });
-      if (res.status === 401) { setInterpState("not-admin"); setInterpMsg("登录状态过期，请重新登录"); return; }
+      if (res.status === 401) { setInterpSubmitError("登录状态过期，请重新登录"); return; }
       if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `触发失败（${res.status}）`);
-      setInterpState("running");
-      setInterpMsg("已提交，worker 正在撰写解读。");
-      await pollForNewInterp(interpretation?.generation ?? 0, force);
+      setInterpSubmittedHere(true);
+      // 立刻拉一次，让进度条不用等下一个轮询周期。
+      await loadGenerationStatus("CN");
     } catch (error) {
-      setInterpState("failed");
-      setInterpMsg((error as Error).message);
+      setInterpSubmitError((error as Error).message);
+    } finally {
+      setInterpSubmitting(false);
     }
-  };
-
-  /**
-   * 轮询统一生成状态接口：generation 变大（或 force 重新生成后内容出现）就是有新解读。
-   * 拿到新解读后直接换本地 state——不整页刷新（页面有 300 秒缓存，刷新也可能读到旧的）。
-   * 同时把任务开始时间与预计耗时交给进度组件，用户能看到倒计时和阶段。
-   */
-  const pollForNewInterp = async (base: number, force: boolean) => {
-    for (let i = 0; i < 80; i++) {
-      await new Promise((r) => setTimeout(r, 3_000));
-      try {
-        const res = await fetch("/api/site/dashboard/generation/status?scope=CN", { credentials: "same-origin", cache: "no-store" });
-        if (!res.ok) continue;
-        const body = await res.json() as GenerationStatusResponse;
-        const status = body.interpretation;
-        if (body.expectedSeconds) setInterpExpected(body.expectedSeconds);
-        if (status.startedAt) {
-          const t = Date.parse(status.startedAt);
-          if (Number.isFinite(t)) setInterpStartedAt(t);
-        }
-        // force 时 generation 会 +1；首次生成时从 0 变成 >=1。
-        const newer = force ? status.generation > base : status.generation > base;
-        const fresh = safeInterpretation(await (await fetch("/api/site/dashboard/allocation/interpretation", {
-          credentials: "same-origin",
-          cache: "no-store",
-        })).json());
-        if (newer && fresh) {
-          setInterpretation(fresh);
-          setInterpState("done");
-          setInterpMsg(`AI 解读已经生成好（第 ${fresh.generation} 版），点下方按钮直接查看报告。`);
-          return;
-        }
-        if (status.lastStatus === "failed" && !status.running) {
-          setInterpState("failed");
-          setInterpMsg(status.lastError ?? "生成失败，请在后台「运行」页查看原因。");
-          return;
-        }
-        // 任务已结束但没写出：如实说明跳过原因（例如「今天已经有解读了」）。
-        if (!status.running && status.lastStatus === "ok" && !newer) {
-          setInterpState("done");
-          setInterpMsg("今天的解读已经存在，点下方按钮查看报告。");
-          return;
-        }
-      } catch { /* 网络抖动，继续等 */ }
-    }
-    setInterpState("timeout");
-    setInterpMsg("等了约 4 分钟还没生成完。任务可能仍在执行，稍后刷新或重试。");
   };
 
   const BTN = "rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50";
@@ -368,19 +330,20 @@ export default function AllocationPage() {
               : <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>登录后生成解读</a>
             }
             {interpretation && (
-              <IntentLink to={`/dashboard/allocation/report?t=${interpretation.generation}`} className={`${BTN} border-accent/40 text-accent hover:bg-accent/10`}>
+              // 普通链接整页跳转，避开 SPA 页面复用缓存；不带日期，报告页按最新一版展示。
+              <a href="/dashboard/allocation/report" className={`${BTN} border-accent/40 text-accent hover:bg-accent/10`}>
                 查看解读报告
-              </IntentLink>
+              </a>
             )}
-            {interpState === "not-admin" && <span className="text-[12px] text-ink-4">{interpMsg}</span>}
           </div>
-          {/* 进度 / 完成提示 / 失败原因：生成中显示倒计时与进度条，完成后主动引导查看 */}
+          {/* 进度 / 完成提示 / 失败原因：状态来自服务端，跳走再回来也能恢复 */}
           <GenerationProgress
-            phase={interpState === "not-admin" ? "idle" : interpState}
-            startedAt={interpStartedAt}
-            expectedSeconds={interpExpected}
-            message={interpMsg}
-            view={{ href: "/dashboard/allocation/report?t=latest", label: "查看 AI 解读报告" }}
+            phase={interpState}
+            startedAt={derived.startedAt}
+            expectedSeconds={derived.expectedSeconds}
+            message={interpSubmitError ?? derived.message}
+            view={{ href: "/dashboard/allocation/report", label: "查看 AI 解读报告" }}
+            readyView={derived.hasToday ? { href: "/dashboard/allocation/report", label: "查看今天的 AI 解读报告", message: "今天的解读已经生成好，可以直接查看。" } : undefined}
             onRetry={() => handleInterp(interpForce)}
           />
           {interpretation && interpretation.regeneratedAt && (

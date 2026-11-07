@@ -4,7 +4,6 @@
 // 进度是按「任务开始时间 + 预计耗时」推算的估算值，不是 worker 的真实百分比
 // （worker 目前不回传阶段）。文案如实写「预计」，不假装精确。
 import { useEffect, useState } from "react";
-import { IntentLink } from "@aihot/web/components/ui/IntentLink";
 
 export type GenerationPhase = "idle" | "submitting" | "running" | "done" | "failed" | "timeout";
 
@@ -24,6 +23,8 @@ export interface GenerationProgressProps {
   message?: string;
   /** 完成后的查看入口。 */
   view?: GenerationView;
+  /** 页面加载时就发现「今天已有报告」时的常驻入口（用户可能是在别处点的生成）。 */
+  readyView?: GenerationView & { message?: string };
   /** 失败后的重试。 */
   onRetry?: () => void;
 }
@@ -52,7 +53,7 @@ const BTN = "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 
  * 只在 running / submitting 时渲染；其余状态由各页面自己的提示区负责。
  * 用 requestAnimationFrame 无关的 1 秒定时器，卸载时清理，SSR 首屏不读浏览器时间。
  */
-export function GenerationProgress({ phase, startedAt, expectedSeconds = 180, message, view, onRetry }: GenerationProgressProps) {
+export function GenerationProgress({ phase, startedAt, expectedSeconds = 180, message, view, readyView, onRetry }: GenerationProgressProps) {
   const [now, setNow] = useState<number | null>(null);
   useEffect(() => {
     if (phase !== "running" && phase !== "submitting") return;
@@ -67,10 +68,25 @@ export function GenerationProgress({ phase, startedAt, expectedSeconds = 180, me
         <div className="text-[13px] font-semibold text-ink-2">报告已经生成好了</div>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-3">{message ?? "内容已写入，可以直接查看。"}</p>
         {view && (
-          <IntentLink to={view.href} className={`${BTN} mt-3 border-accent/40 text-accent hover:bg-accent/10`}>
+          // 普通链接做整页跳转：SPA 的预取链接会走页面复用缓存，
+          // 生成完立刻点可能停在旧 HTML 上，看起来像「点了没反应」。
+          <a href={view.href} className={`${BTN} mt-3 border-accent/40 text-accent hover:bg-accent/10`}>
             {view.label} <span aria-hidden="true">→</span>
-          </IntentLink>
+          </a>
         )}
+      </div>
+    );
+  }
+
+  // 用户可能在别处点了生成、或跳走又回来：页面一加载就根据服务端状态给出常驻入口。
+  if (phase === "idle" && readyView) {
+    return (
+      <div className="mt-3 rounded-sheet border border-line-soft bg-bg-sunk px-4 py-3 dark:bg-bg-muted">
+        <div className="text-[12.5px] font-semibold text-ink-2">今天的报告已经生成好了</div>
+        <p className="mt-1 text-[12px] leading-relaxed text-ink-3">{readyView.message ?? "可以直接查看，无需在页面上等待。"}</p>
+        <a href={readyView.href} className={`${BTN} mt-3 border-accent/40 text-accent hover:bg-accent/10`}>
+          {readyView.label} <span aria-hidden="true">→</span>
+        </a>
       </div>
     );
   }

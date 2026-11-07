@@ -84,6 +84,22 @@ const CASES = [
     name: "生成状态接口返回畸形数据", alloc: allocData, interp: fullInterp, report: fullReport,
     status: { expectedSeconds: null, report: null, interpretation: "坏值" },
   },
+  {
+    name: "回来时服务端报告已有今日成果（恢复出常驻入口）", alloc: allocData, interp: fullInterp, report: fullReport,
+    status: {
+      expectedSeconds: 180, today: "2026-11-07",
+      report: { running: false, lastStatus: "ok", lastError: null, detail: { written: true, reason: null }, startedAt: "2026-11-07T02:30:00.000Z", at: "2026-11-07", writtenAt: "2026-11-07", hasToday: true },
+      interpretation: { running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 2, at: "2026-11-07", hasToday: true },
+    },
+  },
+  {
+    name: "回来时服务端报告仍在跑但已超 10 分钟（僵尸任务）", alloc: allocData, interp: fullInterp, report: fullReport,
+    status: {
+      expectedSeconds: 180, today: "2026-11-07",
+      report: { running: true, lastStatus: "running", lastError: null, detail: null, startedAt: "2026-11-07T02:30:00.000Z", at: null, writtenAt: null, hasToday: false },
+      interpretation: { running: true, lastStatus: "running", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 0, at: null, hasToday: false },
+    },
+  },
 ];
 
 const PAGES = [
@@ -104,8 +120,9 @@ const CONTENT_CHECKS = [
 // 生成状态接口：前端 hydration / 轮询会读它，同样要覆盖各种形状。
 const GENERATION_STATUS = {
   expectedSeconds: 180,
-  report: { running: false, lastStatus: "ok", lastError: null, detail: { written: true, reason: null }, startedAt: "2026-11-07T02:30:00.000Z", at: "2026-11-07", writtenAt: "2026-11-07" },
-  interpretation: { running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 2, at: "2026-11-07" },
+  today: "2026-11-07",
+  report: { running: false, lastStatus: "ok", lastError: null, detail: { written: true, reason: null }, startedAt: "2026-11-07T02:30:00.000Z", at: "2026-11-07", writtenAt: "2026-11-07", hasToday: true },
+  interpretation: { running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 2, at: "2026-11-07", hasToday: true },
 };
 
 let scenario = CASES[0];
