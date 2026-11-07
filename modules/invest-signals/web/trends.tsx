@@ -81,9 +81,10 @@ export default function TrendsPage() {
   const max = sectors.reduce((m, e) => Math.max(m, e.counts.current), 0);
   const rising = sectors.filter((e) => trendOf(e.counts) === "up").length;
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> TREND MONITOR · LIVE</span></div>
       <PhoneBar title="行业趋势" large sub={<>近 7 天与前 7 天的收录变化 · {sectors.length} 个板块</>} />
-      <header className="hidden flex-wrap items-end justify-between gap-x-6 gap-y-2 pb-5 pt-1 lg:flex">
+      <header className="analysis-console__intro hidden flex-wrap items-end justify-between gap-x-6 gap-y-2 pb-5 pt-1 lg:flex">
         <div>
           <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">行业趋势</h1>
           <p className="mt-1.5 max-w-[640px] text-[13.5px] leading-[1.7] text-ink-3">

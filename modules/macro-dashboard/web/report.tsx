@@ -70,9 +70,10 @@ export default function ReportPage() {
   }, [scope]);
   const at = report.at;
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> REPORT · {at ? "READY" : "WAITING"}</span></div>
       <PhoneBar title="每日 PEST 分析" large sub={at ? <><span className="num">{at}</span> · {SCOPE_NAME[scope]}</> : SCOPE_NAME[scope]} />
-      <header className="hidden pb-5 pt-1 lg:block">
+      <header className="analysis-console__intro hidden pb-5 pt-1 lg:block">
         <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">每日 PEST 分析</h1>
         <p className="mt-1.5 max-w-[680px] text-[13.5px] leading-[1.7] text-ink-3">
           按政治、经济、社会、技术四个象限记录当天的宏观与市场数据变化。写的是事实与观察，不是投资建议。

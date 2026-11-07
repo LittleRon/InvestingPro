@@ -167,9 +167,10 @@ export default function AllocationPage() {
   const BTN = "rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50";
 
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> CONFIGURATION · LIVE</span></div>
       <PhoneBar title="组合配置" large sub={<>当前象限：<span className="num">{clock.quadrantName}</span></>} />
-      <header className="hidden pb-5 pt-1 lg:block">
+      <header className="analysis-console__intro hidden pb-5 pt-1 lg:block">
         <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">动态组合配置</h1>
         <p className="mt-1.5 max-w-[680px] text-[13.5px] leading-[1.7] text-ink-3">
           规则引擎基于投资时钟与经济周期位置算出各资产大类基线权重，AI 只写解读不重算权重。配置保存在服务器，挂管理员账户。

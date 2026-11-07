@@ -22,6 +22,12 @@ const dateText = (value: unknown): string | null =>
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
+/** JSONB normally arrives as an object, but older API/proxy layers may hand us a JSON string. */
+const jsonRecord = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== "string") return record(value);
+  try { return record(JSON.parse(value)); } catch { return {}; }
+};
+
 // ---------------------------------------------------------------------------
 // 每日 PEST 报告
 // ---------------------------------------------------------------------------
@@ -106,7 +112,11 @@ export function safeReport(raw: unknown): SafeReport {
     status,
   };
   if (!at) return base;
-  const p = record(r.payload);
+  const rawPayload = jsonRecord(r.payload);
+  // Keep compatibility with the first report writer, which wrapped the body in `content`.
+  const p = Object.keys(rawPayload).length === 1 && rawPayload.content !== undefined
+    ? jsonRecord(rawPayload.content)
+    : rawPayload;
   // 四象限 + watchpoints + snapshot 是渲染体一定会读的；缺任一关键项就退回空状态。
   if (Object.keys(p).length === 0) return base;
   return {
@@ -155,10 +165,14 @@ export function safeInterpretation(raw: unknown): SafeInterpretation | null {
   if (!raw || typeof raw !== "object") return null;
   const r = record(raw);
   if ("missing" in r) return null;
-  const p = record(r.payload);
+  const rawPayload = jsonRecord(r.payload);
+  // A few early rows used `content` around the actual interpretation payload.
+  const p = Object.keys(rawPayload).length === 1 && rawPayload.content !== undefined
+    ? jsonRecord(rawPayload.content)
+    : rawPayload;
   if (!p || Object.keys(p).length === 0) return null;
-  if (typeof p.interpretation !== "string") return null;
-  const s = record(p.snapshot);
+  if (typeof p.interpretation !== "string" || p.interpretation.trim() === "") return null;
+  const s = jsonRecord(p.snapshot);
   return {
     scope: str(r.scope, "CN"),
     at: str(r.at),

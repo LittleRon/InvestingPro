@@ -64,6 +64,20 @@ test("报告里非字符串数组、坏时间戳、错误状态都不会漏到�
   assert.equal(r.status?.detail.reason, null);
 });
 
+test("兼容代理把 JSONB 或旧 content 包装转成字符串的情况", () => {
+  const report = safeReport({
+    scope: "CN", at: "2026-11-07",
+    payload: JSON.stringify({ content: { political: "P", economic: "E" } }),
+  });
+  assert.equal(report.payload?.political, "P");
+  assert.equal(report.payload?.economic, "E");
+  const interpretation = safeInterpretation({
+    scope: "CN", at: "2026-11-07",
+    payload: JSON.stringify({ content: { interpretation: "正文" } }),
+  });
+  assert.equal(interpretation?.payload.interpretation, "正文");
+});
+
 test("完整解读保留原值", () => {
   const i = safeInterpretation(fullInterp);
   assert.ok(i);

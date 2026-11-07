@@ -578,3 +578,85 @@
 :root:not([data-theme="dark"]) body:has(.report-shell) {
   background: color-mix(in srgb, var(--bg) 60%, var(--surface));
 }
+
+/* ---------------------------------------------------------------------------
+   Analysis console: the analysis area is a focused monitoring surface. It keeps
+   the site's content model and theme controls, while using the darker visual
+   language of the analysis product instead of the reading-feed paper surface.
+   --------------------------------------------------------------------------- */
+.analysis-console {
+  --bg: #081216;
+  --bg-sunk: #11252b;
+  --bg-muted: #163139;
+  --surface: #0d1e24;
+  --surface-2: #112a31;
+  --raised: #14323a;
+  --ink: #e9f3ef;
+  --ink-2: #c8d9d5;
+  --ink-3: #9ab0b0;
+  --ink-4: #789195;
+  --line: #28434a;
+  --line-strong: #3a5c63;
+  --line-soft: #1b343a;
+  --accent: #61d6b2;
+  --accent-ink: #081216;
+  --accent-soft: rgba(97, 214, 178, 0.14);
+  --accent-softer: rgba(97, 214, 178, 0.07);
+  --accent-contrast: #081216;
+  --note: #9cc0b6;
+  --hot: #e18468;
+  --hot-soft: rgba(225, 132, 104, 0.14);
+  --amber: #d8ba76;
+  --amber-ink: #d8ba76;
+  --amber-soft: rgba(216, 186, 118, 0.14);
+  --ok: #61d6b2;
+  --ok-soft: rgba(97, 214, 178, 0.14);
+  --ok-ink: #61d6b2;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sheet);
+  color: var(--ink);
+  padding: 12px clamp(12px, 2.5vw, 32px) 32px;
+}
+.analysis-console .analysis-console__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .12em;
+  padding: 6px 0 14px;
+  text-transform: uppercase;
+}
+.analysis-console .analysis-console__brand { color: var(--ink); font-weight: 700; }
+.analysis-console .analysis-console__live { color: var(--accent); white-space: nowrap; }
+.analysis-console .analysis-console__live i {
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px var(--accent-soft), 0 0 12px var(--accent);
+  display: inline-block;
+  height: 7px;
+  margin-right: 7px;
+  width: 7px;
+}
+.analysis-console .analysis-console__intro h1 { letter-spacing: -.04em; }
+.analysis-console .card {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .18);
+}
+.analysis-console .card:hover { border-color: var(--line-strong); }
+.analysis-console .bg-bg-sunk { background-color: var(--bg-sunk); }
+.analysis-console .dark\:bg-bg-muted { background-color: var(--bg-muted); }
+.analysis-console .rounded-sheet { border-color: var(--line); }
+.analysis-console .analysis-console__bar + .phone-bar { border-color: var(--line); }
+
+@media (max-width: 640px) {
+  .analysis-console { border-radius: 0; border-left: 0; border-right: 0; padding-inline: var(--gutter-l) var(--gutter-r); }
+  .analysis-console .analysis-console__bar { font-size: 9px; letter-spacing: .08em; }
+  .analysis-console .analysis-console__brand { max-width: 58%; }
+  .analysis-console .analysis-console__live { overflow: hidden; text-overflow: ellipsis; }
+}

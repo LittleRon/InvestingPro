@@ -380,9 +380,10 @@ export default function DashboardPage() {
   const { data, country, range, cycle } = useLoaderData<typeof loader>();
   const blocks = data.blocks.filter((b) => b.key !== "cycles");
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> DATA PIPELINE · {data.latestReport ? "REPORT READY" : "SYNCING"}</span></div>
       <PhoneBar title="宏观仪表盘" large sub={<>{country === "CN" ? "中国" : "美国"} · 公开宏观与市场价格</>} />
-      <header className="hidden pb-5 pt-1 lg:block">
+      <header className="analysis-console__intro hidden pb-5 pt-1 lg:block">
         <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">宏观仪表盘</h1>
         <p className="mt-1.5 max-w-[680px] text-[13.5px] leading-[1.7] text-ink-3">
           康德拉季耶夫长波、朱格拉中周期、基钦短周期三个频带，加上黄金与指数基金、原油、CPI/PPI 和大宗商品的价格。数据取自 FRED 与世界银行的公开接口，每天 06:30 采集一次。

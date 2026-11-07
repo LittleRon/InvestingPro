@@ -102,13 +102,14 @@ export default function SignalsPage() {
   const { signals } = useLoaderData<typeof loader>();
   const { stats, computedAt } = signals;
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> SIGNALS · {signals.signals.length ? "MONITORING" : "WAITING"}</span></div>
       <PhoneBar
         title="信号置信度"
         large
         sub={<>{computedAt ? <><span className="num">{monthDayTime(computedAt)}</span> 更新 · </> : null}按可核查程度排序</>}
       />
-      <header className="hidden flex-wrap items-end justify-between gap-x-6 gap-y-2 pb-5 pt-1 lg:flex">
+      <header className="analysis-console__intro hidden flex-wrap items-end justify-between gap-x-6 gap-y-2 pb-5 pt-1 lg:flex">
         <div>
           <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">信号置信度榜</h1>
           <p className="mt-1.5 max-w-[640px] text-[13.5px] leading-[1.7] text-ink-3">

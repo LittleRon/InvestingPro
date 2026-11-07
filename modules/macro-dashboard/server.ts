@@ -336,7 +336,9 @@ export default defineServerModule({
       const q = (req.query ?? {}) as Record<string, unknown>;
       const scope = isCountry(q.scope) ? q.scope : "CN";
       const at = isoDate(q.at);
-      const report = at ? await reportOn(scope, at) : await latestReport(scope);
+      // A stale link can carry a date that no longer exists after a migration or timezone
+      // normalization. Prefer the available latest report over rendering an empty detail page.
+      const report = at ? (await reportOn(scope, at)) ?? await latestReport(scope) : await latestReport(scope);
       // 诊断：报告为什么还没有——最近一次任务的状态（数据不足被跳过、模型报错、从未跑过）。
       const status = await reportRunStatus(scope);
       const body = report

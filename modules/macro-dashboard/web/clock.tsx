@@ -245,9 +245,10 @@ export default function ClockPage() {
   const { clock } = useLoaderData<typeof loader>();
 
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> CYCLE MONITOR · LIVE</span></div>
       <PhoneBar title="投资时钟" large sub={<>中国综合版 · <span className="num">{clock.quadrantName}</span></>} />
-      <header className="hidden pb-5 pt-1 lg:block">
+      <header className="analysis-console__intro hidden pb-5 pt-1 lg:block">
         <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">投资时钟</h1>
         <p className="mt-1.5 max-w-[680px] text-[13.5px] leading-[1.7] text-ink-3">
           以制造业 PMI 趋势定增长、PPI 与 CPI 加权定通胀，定位当前经济象限。纯计算，零模型成本。

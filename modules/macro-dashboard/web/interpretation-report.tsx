@@ -71,9 +71,10 @@ export default function InterpretationReportPage() {
 
   if (!interpretation) {
     return (
-      <div className="pb-10">
+      <div className="analysis-console pb-10">
+        <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> AI INTERPRETATION · WAITING</span></div>
         <PhoneBar title="AI 解读报告" large sub="动态组合配置" />
-        <header className="hidden pb-5 pt-1 lg:block">
+        <header className="analysis-console__intro hidden pb-5 pt-1 lg:block">
           <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink lg:text-[26px]">AI 解读报告</h1>
         </header>
         <div className="card rounded-sheet">
@@ -98,9 +99,10 @@ export default function InterpretationReportPage() {
   const s = p?.snapshot ?? EMPTY_SNAPSHOT;
   const watchpoints = p?.watchpoints ?? [];
   return (
-    <div className="pb-10">
+    <div className="analysis-console pb-10">
+      <div className="analysis-console__bar" role="status"><span className="analysis-console__brand">INVESTPRO / ANALYSIS CONSOLE</span><span className="analysis-console__live"><i /> AI INTERPRETATION · READY</span></div>
       <PhoneBar title="AI 解读报告" large sub={<>生成于 <span className="num">{interpretation.at}</span></>} />
-      <header className="hidden pb-5 pt-1 lg:block">
+      <header className="analysis-console__intro hidden pb-5 pt-1 lg:block">
         <h1 className="text-[24px] font-bold leading-[1.3] tracking-[-0.01em] text-ink">AI 解读报告</h1>
         <p className="mt-1.5 max-w-[680px] text-[13.5px] leading-[1.7] text-ink-3">
           基于投资时钟与经济周期位置撰写的组合配置解读。规则引擎算权重，AI 只写解读，不重算权重。
