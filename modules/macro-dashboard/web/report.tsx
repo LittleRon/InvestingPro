@@ -9,7 +9,8 @@ import { EmptyState } from "@aihot/web/components/ui/Page";
 import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { ReportNowButton } from "./report-now.tsx";
-import { safeReport, type SafeReport } from "../normalize.ts";
+import { safeReport, type SafeReport, type SafeReportStatus } from "../normalize.ts";
+import { useEffect, useState } from "react";
 
 export const handle: Screen = { tab: "dashboard", name: "PEST 分析" };
 export { pageHeaders as headers };
@@ -21,8 +22,8 @@ type ReportResponse = SafeReport;
 
 const SCOPE_NAME: Record<string, string> = { CN: "中国", US: "美国" };
 
-/** 把报告任务的运行记录说人话（解释「为什么还没有」）。 */
-function explainStatus(status: { job: string; status: string; error: string | null; detail: Record<string, unknown> | null } | null): string {
+/** 把报告任务的运行记录说人话（解释「为什么还没有」）。detail 已由服务端归一化。 */
+function explainStatus(status: SafeReportStatus | null): string {
   if (!status) return "还从未跑过报告任务（检查 worker 是否在跑、定时任务是否注册）。";
   if (status.status === "running") return "报告任务正在跑，稍等片刻刷新。";
   if (status.status === "failed") {
@@ -30,9 +31,9 @@ function explainStatus(status: { job: string; status: string; error: string | nu
     return `报告任务上次失败：${reason}`;
   }
   if (status.status === "ok") {
-    const detail = status.detail as { written?: boolean; reason?: string } | null;
-    if (detail?.written === false) return detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
-    return "上次任务跑过了，但没有写出报告。";
+    if (status.detail.written === false) return status.detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
+    if (status.detail.written === true) return "报告已写出；若这里还没显示，稍等片刻或点下方按钮刷新查看。";
+    return "上次任务已完成，可在下方查看生成进度与结果。";
   }
   return `报告任务最近一次状态：${status.status}`;
 }
@@ -61,7 +62,25 @@ const QUADRANTS = [
 ];
 
 export default function ReportPage() {
-  const { report, scope } = useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<typeof loader>();
+  const { scope } = loaderData;
+  // 报告接口已是 no-store，但页面 HTML 本身有 300 秒缓存。管理员刚生成完点进来时，
+  // SSR 那份可能还是「还没有这一天的报告」；hydration 后补拉一次，立刻换成最新内容。
+  const [report, setReport] = useState<SafeReport>(loaderData.report);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/site/dashboard/report?scope=${scope}`, { credentials: "same-origin", cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const fresh = safeReport(await res.json());
+        // 只在确实有变化（新报告出现、或内容版本变了）时替换，避免无谓重渲染。
+        if (fresh.at !== report.at || fresh.payload?.political !== report.payload?.political) setReport(fresh);
+      } catch { /* 网络抖动，用 SSR 那份 */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
   const at = report.at;
   return (
     <div className="pb-10">
@@ -77,10 +96,11 @@ export default function ReportPage() {
         <div className="card rounded-sheet">
           <EmptyState
             title="还没有这一天的报告"
-            action={<ReportNowButton scope={scope as "CN" | "US"} />}
+            action={<div className="flex flex-col items-center gap-2"><ReportNowButton scope={scope as "CN" | "US"} /></div>}
           >
             {report.missing ?? "每天 06:40 写一次，采集到足够数据才有。"}
             <span className="block mt-1 text-ink-3">{explainStatus(report.status ?? null)}</span>
+            <span className="block mt-1 text-ink-4">点「立即编写今天」后，这里会显示预计等待时间和生成进度；写好后会自动提示并给出查看入口。</span>
           </EmptyState>
         </div>
       ) : (

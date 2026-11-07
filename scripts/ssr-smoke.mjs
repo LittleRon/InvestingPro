@@ -62,13 +62,51 @@ const CASES = [
   { name: "组合配置接口返回空对象", alloc: {}, interp: fullInterp, report: fullReport },
   { name: "组合配置接口返回 null", alloc: null, interp: fullInterp, report: fullReport },
   { name: "所有接口都返回畸形数据", alloc: { clock: null, horizons: "坏值" }, interp: { payload: {} }, report: { at: "2026-11-07", payload: { watchpoints: "坏值" } } },
+  {
+    name: "生成任务运行中（状态接口返回 running）", alloc: allocData, interp: { missing: "还没有生成解读" },
+    report: { scope: "CN", at: null, missing: "这一天的报告还没有生成", status: null },
+    status: {
+      expectedSeconds: 180,
+      report: { running: true, lastStatus: "running", lastError: null, detail: null, startedAt: "2026-11-07T02:30:00.000Z", at: null, writtenAt: null },
+      interpretation: { running: true, lastStatus: "running", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 0, at: null },
+    },
+  },
+  {
+    name: "生成任务失败（带错误原因）", alloc: allocData, interp: { missing: "还没有生成解读" },
+    report: { scope: "CN", at: null, missing: "这一天的报告还没有生成", status: { job: "macro.report", status: "failed", error: "模型超时", detail: null } },
+    status: {
+      expectedSeconds: 180,
+      report: { running: false, lastStatus: "failed", lastError: "模型超时", detail: null, startedAt: "2026-11-07T02:30:00.000Z", at: null, writtenAt: null },
+      interpretation: { running: false, lastStatus: "failed", lastError: "模型超时", startedAt: "2026-11-07T02:30:00.000Z", generation: 0, at: null },
+    },
+  },
+  {
+    name: "生成状态接口返回畸形数据", alloc: allocData, interp: fullInterp, report: fullReport,
+    status: { expectedSeconds: null, report: null, interpretation: "坏值" },
+  },
 ];
 
 const PAGES = [
   { path: "/dashboard/allocation", marker: "动态组合配置" },
   { path: "/dashboard/report", marker: "每日 PEST 分析" },
   { path: "/dashboard/report?scope=US", marker: "每日 PEST 分析" },
+  { path: "/dashboard/allocation/report", marker: "AI 解读报告" },
 ];
+
+/** 有数据时，页面必须真的把正文和查看入口渲染出来，而不只是返回 200。 */
+const CONTENT_CHECKS = [
+  { path: "/dashboard/report", when: "完整数据（有报告 + 有解读）", must: ["政治象限", "关注要点", "原始宏观数据快照"] },
+  { path: "/dashboard/allocation", when: "完整数据（有报告 + 有解读）", must: ["这是一段 AI 解读正文。", "查看解读报告"] },
+  { path: "/dashboard/allocation/report", when: "完整数据（有报告 + 有解读）", must: ["这是一段 AI 解读正文。", "关注 PPI", "返回组合配置"] },
+  { path: "/dashboard/allocation/report", when: "还没有任何报告 / 解读", must: ["还没有生成 AI 解读报告", "去组合配置生成"] },
+];
+
+// 生成状态接口：前端 hydration / 轮询会读它，同样要覆盖各种形状。
+const GENERATION_STATUS = {
+  expectedSeconds: 180,
+  report: { running: false, lastStatus: "ok", lastError: null, detail: { written: true, reason: null }, startedAt: "2026-11-07T02:30:00.000Z", at: "2026-11-07", writtenAt: "2026-11-07" },
+  interpretation: { running: false, lastStatus: "ok", lastError: null, startedAt: "2026-11-07T02:30:00.000Z", generation: 2, at: "2026-11-07" },
+};
 
 let scenario = CASES[0];
 
@@ -80,6 +118,7 @@ const api = createServer((req, res) => {
   const body = path === "/api/site/dashboard/allocation" ? scenario.alloc
     : path === "/api/site/dashboard/allocation/interpretation" ? scenario.interp
     : path === "/api/site/dashboard/report" ? scenario.report
+    : path === "/api/site/dashboard/generation/status" ? (scenario.status ?? GENERATION_STATUS)
     : { changelogVersion: null };
   res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
@@ -119,6 +158,22 @@ try {
       console.log(`${ok ? "ok  " : "FAIL"} ${String(res.status).padEnd(3)} ${c.name} → ${page.path}${ok ? "" : ` (marker=${html.includes(page.marker)})`}`);
     }
   }
+
+  // 内容断言：把 stub 切到指定场景，确认正文与查看入口真的出现在 HTML 里。
+  // 必须在 finally 关闭 web 进程之前跑。
+  console.log("\n--- content checks ---");
+  for (const [i, check] of CONTENT_CHECKS.entries()) {
+    scenario = CASES.find((x) => x.name === check.when);
+    const url = `http://127.0.0.1:${webPort}${check.path}?content=${i}&n=${checked}`;
+    const res = await fetch(url);
+    const html = await res.text();
+    for (const needle of check.must) {
+      const ok = res.status === 200 && html.includes(needle);
+      checked++;
+      if (!ok) failed++;
+      console.log(`${ok ? "ok  " : "FAIL"} ${check.path} contains "${needle}"`);
+    }
+  }
 } catch (error) {
   failed++;
   console.log("FAIL harness:", error.message);
@@ -127,6 +182,6 @@ try {
   api.close();
 }
 
-console.log(`\n${checked - failed}/${checked} SSR requests returned 200 with the expected page`);
+console.log(`\n${checked - failed}/${checked} SSR checks passed`);
 if (failed && webLog.trim()) console.log("web log (tail):", webLog.trim().slice(-1500));
 process.exit(failed === 0 ? 0 : 1);

@@ -17,7 +17,7 @@ import { fredConfigured } from "./collect/fred.ts";
 import { marketProvider } from "./collect/market.ts";
 import { composeReport, latestReport } from "./report.ts";
 import { composeInterpretation, latestInterpretation } from "./interpretation.ts";
-import { safeInterpretation, safeReport } from "./normalize.ts";
+import { safeInterpretation, safeReport, safeJobDetail, type SafeReportStatus } from "./normalize.ts";
 
 const DAY_MS = 86_400_000;
 const CACHE_CONTROL = "public, max-age=300, s-maxage=300";
@@ -119,7 +119,7 @@ export interface DashboardResponse {
   sources: { fred: boolean; market: boolean; marketProvider: string | null };
   latestReport: { at: string; scope: string } | null;
   /** 最近一次报告任务的运行记录（job_runs），给前端诊断「为什么还没有报告」。 */
-  reportStatus: { job: string; status: string; at: string; error: string | null; detail: Record<string, unknown> | null } | null;
+  reportStatus: SafeReportStatus | null;
 }
 
 function weakEtag(prefix: string, body: string): string {
@@ -327,19 +327,53 @@ export default defineServerModule({
       const only = typeof q.cycle === "string" && CYCLES.some((c) => c.key === q.cycle) ? (q.cycle as CycleKey) : null;
       sendJson(req, reply, await loadCycles(country, isoDate(q.from), isoDate(q.to), only), "cyc");
     });
+    // 报告内容会在「立即编写」成功后立刻变化，不能用 sendJson 的 300 秒共享缓存，
+    // 否则生成完再点「查看报告」拿到的还是旧的「还没有这一天的报告」。
     app.get("/api/site/dashboard/report", async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
       const q = (req.query ?? {}) as Record<string, unknown>;
       const scope = isCountry(q.scope) ? q.scope : "CN";
       const at = isoDate(q.at);
       const report = at ? await reportOn(scope, at) : await latestReport(scope);
       // 诊断：报告为什么还没有——最近一次任务的状态（数据不足被跳过、模型报错、从未跑过）。
       const status = await reportRunStatus(scope);
-      if (report) {
-        // 出口就给结构完整的报告：老版本写的记录缺字段时不让任何客户端（含缓存的旧 JS）崩。
-        sendJson(req, reply, safeReport({ ...report, status }), "rpt");
-      } else {
-        sendJson(req, reply, { scope, at: null, missing: "这一天的报告还没有生成", status }, "rpt");
-      }
+      const body = report
+        ? safeReport({ ...report, status })
+        : safeReport({ scope, at: null, missing: "这一天的报告还没有生成", status });
+      reply.header("Content-Type", "application/json; charset=utf-8").send(JSON.stringify(body));
+    });
+    // 生成状态：报告与 AI 解读共用一个轮询入口，给前端算倒计时和进度条。
+    // 返回「任务开始时间 + 预计耗时 + 当前状态 + 是否已经写出」，不缓存。
+    app.get("/api/site/dashboard/generation/status", async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+      const q = (req.query ?? {}) as Record<string, unknown>;
+      const scope = isCountry(q.scope) ? q.scope : "CN";
+      const status = await reportRunStatus(scope);
+      const report = await latestReport(scope);
+      const interp = await latestInterpretation();
+      const [interpRun] = await sql<{ status: string; started_at: Date; error: string | null; detail: Record<string, unknown> | null }[]>`
+        SELECT status, started_at, error, detail FROM job_runs WHERE job = 'macro.interp' ORDER BY started_at DESC, id DESC LIMIT 1`;
+      reply.header("Content-Type", "application/json; charset=utf-8").send(JSON.stringify({
+        // 采集 + 一次模型调用通常 30–90 秒，给 3 分钟的预期上限，前端只做「还剩大约多久」的提示。
+        expectedSeconds: 180,
+        report: {
+          running: status?.status === "running",
+          lastStatus: status?.status ?? null,
+          lastError: status?.error ?? null,
+          detail: status?.detail ?? null,
+          startedAt: status?.startedAt ?? null,
+          at: report?.at ?? null,
+          writtenAt: report?.at ?? null,
+        },
+        interpretation: {
+          running: interpRun?.status === "running",
+          lastStatus: interpRun?.status ?? null,
+          lastError: interpRun?.error ?? null,
+          startedAt: interpRun ? new Date(interpRun.started_at).toISOString() : null,
+          generation: interp?.generation ?? 0,
+          at: interp?.at ?? null,
+        },
+      }));
     });
     // 美林投资时钟（中国综合版）：纯计算，读 PMI/PPI/CPI/M0，不调模型。
     app.get("/api/site/dashboard/clock", async (req, reply) => {
@@ -485,12 +519,21 @@ async function enqueueInterpretation(force = false): Promise<void> {
  * 最近一次报告任务的运行记录（job_runs），给前端诊断「为什么还没有报告」。
  * 定时任务和「立即编写」队列都算：取两者里最新的一条。
  */
-async function reportRunStatus(scope: CountryKey): Promise<{ job: string; status: string; at: string; error: string | null; detail: Record<string, unknown> | null } | null> {
+async function reportRunStatus(scope: CountryKey): Promise<SafeReportStatus | null> {
   const name = scope === "US" ? "macro.report.us" : "macro.report";
-  const [row] = await sql<{ job: string; status: string; started_at: Date; error: string | null; detail: Record<string, unknown> | null }[]>`
+  const [row] = await sql<{ job: string; status: string; started_at: Date; error: string | null; detail: unknown }[]>`
     SELECT job, status, started_at, error, detail FROM job_runs WHERE job IN (${name}, 'macro.report-now') ORDER BY started_at DESC, id DESC LIMIT 1`;
   if (!row) return null;
-  return { job: row.job, status: row.status, at: new Date(row.started_at).toISOString().slice(0, 10), error: row.error, detail: row.detail };
+  return {
+    job: row.job,
+    status: row.status,
+    at: new Date(row.started_at).toISOString().slice(0, 10),
+    error: row.error,
+    // 队列任务的 detail 是数组（ReportNowRun[]），定时任务是对象；统一成同一个形状，
+    // 否则页面把数组当对象读 written，会误报「跑过了，但没有写出报告」。
+    detail: safeJobDetail(row.detail),
+    startedAt: new Date(row.started_at).toISOString(),
+  };
 }
 
 /** 读取管理员的动态配置（持仓 + 总资产 + 时效范围）。没有记录时返回默认值。 */

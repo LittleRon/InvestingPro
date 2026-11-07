@@ -9,6 +9,7 @@ export default defineModule({
     { path: "dashboard/report", file: "web/report.tsx", id: "dashboard-report" },
     { path: "dashboard/clock", file: "web/clock.tsx", id: "dashboard-clock" },
     { path: "dashboard/allocation", file: "web/allocation.tsx", id: "dashboard-allocation" },
+    { path: "dashboard/allocation/report", file: "web/interpretation-report.tsx", id: "dashboard-allocation-report" },
   ],
   apiPaths: [/^\/api\/site\/dashboard/, /^\/api\/admin\/macro\/(report|allocation)$/],
 });

@@ -58,12 +58,12 @@ test("组合配置页和报告按钮的登录回跳链接走 useLocation", () =>
 
 test("「检查登录状态」在登录成功后会离开，按钮不会永远置灰", () => {
   const text = read("modules/macro-dashboard/web/report-now.tsx");
-  assert.match(text, /useState<Phase>\("checking"\)/, "初始状态是检查中");
-  assert.match(text, /"ready"/, "Phase 需要一个登录成功后的状态");
-  // 成功分支：拿到 me 之后必须 setPhase，否则 phase 永远停在 checking。
-  assert.match(text, /res\.json\(\) as AdminMe;[\s\S]{0,240}setPhase\("ready"\)/,
+  assert.match(text, /useState<Check>\("checking"\)/, "初始状态是检查中");
+  assert.match(text, /type Check = "checking" \| "ready"/, "登录成功需要一个独立状态");
+  // 成功分支：拿到 me 之后必须离开 checking，否则按钮永远置灰。
+  assert.match(text, /res\.json\(\) as AdminMe;[\s\S]{0,300}setCheck\("ready"\)/,
     "/api/admin/me 返回 200 后必须切到 ready");
-  assert.match(text, /phase === "checking"[^\n]*disabled/, "checking 时按钮确实置灰");
+  assert.match(text, /check === "checking"[^\n]*disabled/, "checking 时按钮确实置灰");
 });
 
 /** 声明了 application/json 却没有 body 的请求会被 Fastify 判 400，全局错误处理回
@@ -99,4 +99,38 @@ test("报告页与组合配置页的 loader 都先规范化再交给渲染体", 
     "渲染体不能再直接对未守卫的 payload 取 length");
   assert.doesNotMatch(alloc, /interpretation\.payload\.snapshot\./,
     "解读快照要统一走带默认值的局部变量");
+});
+
+test("报告接口与生成状态接口都不缓存，生成完立刻能看到结果", () => {
+  const server = read("modules/macro-dashboard/server.ts");
+  const reportRoute = server.match(/app\.get\("\/api\/site\/dashboard\/report"[\s\S]{0,700}/)?.[0] ?? "";
+  assert.match(reportRoute, /Cache-Control", "no-store"/, "报告内容会变，不能用 300 秒共享缓存");
+  assert.doesNotMatch(reportRoute, /sendJson\(/, "报告接口不能再用带缓存的 sendJson");
+  assert.match(server, /app\.get\("\/api\/site\/dashboard\/generation\/status"/, "要有统一的生成状态接口");
+  assert.match(server, /expectedSeconds: 180/, "状态接口要给出预计耗时，前端才能显示倒计时");
+  assert.match(server, /safeJobDetail\(row\.detail\)/, "任务 detail 必须在服务端归一化");
+});
+
+test("生成进度与完成引导：报告按钮、组合配置页都用同一个进度组件", () => {
+  const btn = read("modules/macro-dashboard/web/report-now.tsx");
+  const alloc = read("modules/macro-dashboard/web/allocation.tsx");
+  const progress = read("modules/macro-dashboard/web/generation-progress.tsx");
+  assert.match(btn, /GenerationProgress/, "报告按钮要显示进度");
+  assert.match(alloc, /GenerationProgress/, "AI 解读要显示进度");
+  assert.match(progress, /role="progressbar"/, "要有进度条");
+  assert.match(progress, /预计还需|已超过预计时间/, "要有倒计时文案");
+  assert.match(progress, /报告已经生成好了/, "完成后要主动提示");
+  assert.match(progress, /view\.href/, "完成后要引导直接查看报告");
+  assert.match(btn, /查看今天的 PEST 报告/, "PEST 完成提示要带查看入口");
+  assert.match(alloc, /查看解读报告/, "组合配置页要有查看解读报告按钮");
+});
+
+test("解读报告详情页已注册，且两页 hydration 后都会补拉最新数据", () => {
+  const moduleTs = read("modules/macro-dashboard/module.ts");
+  assert.match(moduleTs, /dashboard\/allocation\/report/, "新页面必须注册进路由");
+  const page = read("modules/macro-dashboard/web/interpretation-report.tsx");
+  assert.match(page, /safeInterpretation\(/, "详情页 loader 要规范化数据");
+  const report = read("modules/macro-dashboard/web/report.tsx");
+  assert.match(page, /cache: "no-store"/, "详情页 hydration 后要补拉最新解读");
+  assert.match(report, /cache: "no-store"/, "报告页 hydration 后要补拉最新报告");
 });

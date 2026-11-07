@@ -2,7 +2,7 @@
 // 渲染体的输入一律先过这一层：结构不完整就退回空状态，绝不 500。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { safeAllocation, safeInterpretation, safeReport } from "../normalize.ts";
+import { safeAllocation, safeInterpretation, safeReport, safeJobDetail } from "../normalize.ts";
 
 const fullReport = {
   scope: "CN", at: "2026-11-07", model: "default",
@@ -59,7 +59,9 @@ test("报告里非字符串数组、坏时间戳、错误状态都不会漏到�
   assert.deepEqual(r.payload!.watchpoints, ["有效"]);
   assert.equal(r.payload!.snapshot, "42");
   assert.equal(r.status?.error, "模型失败");
-  assert.equal(r.status?.detail, null);
+  // detail 恒为归一化对象（不再透传裸 null），渲染体和状态解释都不用判空。
+  assert.equal(r.status?.detail.written, null);
+  assert.equal(r.status?.detail.reason, null);
 });
 
 test("完整解读保留原值", () => {
@@ -113,6 +115,39 @@ test("组合配置任何畸形输入都给完整结构，渲染体的 map/find �
       d.allocation.notes.map((n) => n);
     });
   }
+});
+
+test("任务 detail 归一化：队列任务的数组与定时任务的对象都能读出 written/reason", () => {
+  // recordRun 对队列任务存的是数组（ReportNowRun[]），定时任务是对象。
+  // 之前页面把数组当对象读，误报「上次任务跑过了，但没有写出报告」。
+  const fromArray = safeJobDetail([{ scope: "CN", collected: 42, written: true }]);
+  assert.equal(fromArray.written, true);
+  assert.equal(fromArray.collected, 42);
+  const fromObject = safeJobDetail({ collected: 7, written: false, reason: "只有 3 项数据，不够写报告" });
+  assert.equal(fromObject.written, false);
+  assert.equal(fromObject.reason, "只有 3 项数据，不够写报告");
+  for (const raw of [null, undefined, [], {}, "坏值", [{ written: "yes" }]]) {
+    assert.equal(safeJobDetail(raw).written, null, `畸形 detail 不应被当成成功: ${JSON.stringify(raw)}`);
+  }
+  assert.equal(safeJobDetail([{ generation: 3 }]).generation, 3);
+});
+
+test("报告状态带归一化 detail 与 startedAt，页面能说人话", () => {
+  const r = safeReport({
+    scope: "CN", at: null,
+    status: {
+      job: "macro.report-now", status: "ok", at: "2026-11-07", error: null,
+      detail: [{ written: true, reason: null }], startedAt: "2026-11-07T02:30:00.000Z",
+    },
+  });
+  assert.equal(r.status?.detail.written, true, "数组 detail 必须被归一化成对象");
+  assert.equal(r.status?.startedAt, "2026-11-07T02:30:00.000Z");
+  const skipped = safeReport({
+    scope: "CN", at: null,
+    status: { job: "macro.report", status: "ok", detail: { written: false, reason: "只有 3 项数据，不够写报告" } },
+  });
+  assert.equal(skipped.status?.detail.reason, "只有 3 项数据，不够写报告");
+  assert.equal(skipped.status?.startedAt, null);
 });
 
 test("组合配置正常数据保留权重数值", () => {

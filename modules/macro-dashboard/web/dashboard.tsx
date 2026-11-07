@@ -60,16 +60,17 @@ export function meta() {
 const TONES = ["text-accent", "text-hot", "text-ink-3", "text-ink-4"];
 
 /** 把报告任务的运行记录说人话（解释「为什么还没有报告」）。 */
-function explainReportStatus(status: { job: string; status: string; error: string | null; detail: Record<string, unknown> | null }): string {
+function explainReportStatus(status: NonNullable<DashboardResponse["reportStatus"]>): string {
   if (status.status === "running") return "报告任务正在跑，稍等片刻刷新。";
   if (status.status === "failed") {
     const reason = status.error ? status.error.split("\n")[0]!.slice(0, 120) : "未知错误";
     return `报告任务上次失败：${reason}`;
   }
   if (status.status === "ok") {
-    const detail = status.detail as { written?: boolean; reason?: string } | null;
-    if (detail?.written === false) return detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
-    return "上次任务跑过了，但没有写出报告。";
+    // detail 已由服务端归一化：队列任务存的是数组，之前当对象读会误报「没写出报告」。
+    if (status.detail.written === false) return status.detail.reason ?? "上次任务跳过了（数据不够或已有报告）。";
+    if (status.detail.written === true) return "报告已写出，点右侧「查看报告」即可阅读。";
+    return "上次任务已完成，可查看今天生成的报告。";
   }
   return `报告任务最近一次状态：${status.status}`;
 }

@@ -11,6 +11,7 @@ import { PhoneBar } from "@aihot/web/components/shell/PhoneBar";
 import type { Screen } from "@aihot/web/components/shell/screens";
 import { HORIZONS } from "../allocation.ts";
 import { safeAllocation, safeInterpretation, type SafeAllocationData, type SafeInterpretation } from "../normalize.ts";
+import { GenerationProgress, type GenerationPhase } from "./generation-progress.tsx";
 
 export const handle: Screen = { tab: "dashboard", name: "组合配置" };
 export { pageHeaders as headers };
@@ -21,13 +22,19 @@ export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 type AllocationResponse = SafeAllocationData;
 type InterpretationResponse = SafeInterpretation;
 
-/** 生成状态：有没有在跑、服务器上的解读是不是比客户端这份新。 */
+/** /api/site/dashboard/generation/status 里解读那一侧的字段。 */
 interface InterpStatus {
   running: boolean;
   lastStatus: string | null;
   lastError: string | null;
+  startedAt: string | null;
   generation: number;
-  regeneratedAt: string | null;
+  at: string | null;
+}
+
+interface GenerationStatusResponse {
+  expectedSeconds: number;
+  interpretation: InterpStatus;
 }
 
 interface AdminMe { name: string; csrf: string; dev: boolean }
@@ -99,8 +106,11 @@ export default function AllocationPage() {
   const [saveMsg, setSaveMsg] = useState("");
 
   // AI 解读状态
-  const [interpState, setInterpState] = useState<"idle" | "generating" | "done" | "error" | "not-admin">("idle");
+  const [interpState, setInterpState] = useState<GenerationPhase | "not-admin">("idle");
   const [interpMsg, setInterpMsg] = useState("");
+  const [interpStartedAt, setInterpStartedAt] = useState<number | null>(null);
+  const [interpExpected, setInterpExpected] = useState(180);
+  const [interpForce, setInterpForce] = useState(false);
 
   const ASSET_KEYS = ["stocks", "bonds", "commodities", "cash", "gold"] as const;
   const ASSET_NAMES: Record<string, string> = { stocks: "股票", bonds: "债券", commodities: "大宗商品", cash: "现金", gold: "黄金" };
@@ -161,8 +171,10 @@ export default function AllocationPage() {
    */
   const handleInterp = async (force: boolean) => {
     if (!admin) { setInterpState("not-admin"); setInterpMsg("需要管理员登录"); return; }
-    setInterpState("generating");
-    setInterpMsg(force ? "正在重新生成…" : "正在生成…");
+    setInterpForce(force);
+    setInterpState("submitting");
+    setInterpStartedAt(Date.now());
+    setInterpMsg(force ? "正在提交重新生成…" : "正在提交…");
     try {
       const res = await fetch("/api/admin/macro/allocation/interpretation", {
         method: "POST",
@@ -172,50 +184,60 @@ export default function AllocationPage() {
       });
       if (res.status === 401) { setInterpState("not-admin"); setInterpMsg("登录状态过期，请重新登录"); return; }
       if (!res.ok) throw new Error((await res.json().catch(() => ({})) as { detail?: string }).detail ?? `触发失败（${res.status}）`);
-      setInterpMsg("已提交，正在生成…");
-      await pollForNewInterp(interpretation?.generation ?? 0);
+      setInterpState("running");
+      setInterpMsg("已提交，worker 正在撰写解读。");
+      await pollForNewInterp(interpretation?.generation ?? 0, force);
     } catch (error) {
-      setInterpState("error");
+      setInterpState("failed");
       setInterpMsg((error as Error).message);
     }
   };
 
   /**
-   * 轮询生成状态：服务器上的 generation 变大就是有新解读。
+   * 轮询统一生成状态接口：generation 变大（或 force 重新生成后内容出现）就是有新解读。
    * 拿到新解读后直接换本地 state——不整页刷新（页面有 300 秒缓存，刷新也可能读到旧的）。
+   * 同时把任务开始时间与预计耗时交给进度组件，用户能看到倒计时和阶段。
    */
-  const pollForNewInterp = async (base: number) => {
-    for (let i = 0; i < 40; i++) {
-      await new Promise((r) => setTimeout(r, 5_000));
+  const pollForNewInterp = async (base: number, force: boolean) => {
+    for (let i = 0; i < 80; i++) {
+      await new Promise((r) => setTimeout(r, 3_000));
       try {
-        const res = await fetch("/api/site/dashboard/allocation/interpretation/status", { credentials: "same-origin", cache: "no-store" });
+        const res = await fetch("/api/site/dashboard/generation/status?scope=CN", { credentials: "same-origin", cache: "no-store" });
         if (!res.ok) continue;
-        const status = await res.json() as InterpStatus;
-        if (status.generation > base) {
-          const fresh = safeInterpretation(await (await fetch("/api/site/dashboard/allocation/interpretation", {
-            credentials: "same-origin",
-            cache: "no-store",
-          })).json());
-          if (fresh) {
-            setInterpretation(fresh);
-            setInterpState("done");
-            setInterpMsg(`已生成第 ${fresh.generation} 版`);
-          } else {
-            setInterpState("done");
-            setInterpMsg("已生成，页面正在刷新…");
-            window.location.reload();
-          }
+        const body = await res.json() as GenerationStatusResponse;
+        const status = body.interpretation;
+        if (body.expectedSeconds) setInterpExpected(body.expectedSeconds);
+        if (status.startedAt) {
+          const t = Date.parse(status.startedAt);
+          if (Number.isFinite(t)) setInterpStartedAt(t);
+        }
+        // force 时 generation 会 +1；首次生成时从 0 变成 >=1。
+        const newer = force ? status.generation > base : status.generation > base;
+        const fresh = safeInterpretation(await (await fetch("/api/site/dashboard/allocation/interpretation", {
+          credentials: "same-origin",
+          cache: "no-store",
+        })).json());
+        if (newer && fresh) {
+          setInterpretation(fresh);
+          setInterpState("done");
+          setInterpMsg(`AI 解读已经生成好（第 ${fresh.generation} 版），点下方按钮直接查看报告。`);
           return;
         }
         if (status.lastStatus === "failed" && !status.running) {
-          setInterpState("error");
-          setInterpMsg(status.lastError ?? "生成失败");
+          setInterpState("failed");
+          setInterpMsg(status.lastError ?? "生成失败，请在后台「运行」页查看原因。");
+          return;
+        }
+        // 任务已结束但没写出：如实说明跳过原因（例如「今天已经有解读了」）。
+        if (!status.running && status.lastStatus === "ok" && !newer) {
+          setInterpState("done");
+          setInterpMsg("今天的解读已经存在，点下方按钮查看报告。");
           return;
         }
       } catch { /* 网络抖动，继续等 */ }
     }
-    setInterpState("error");
-    setInterpMsg("等了 3 分钟还没生成完，稍后刷新看看");
+    setInterpState("timeout");
+    setInterpMsg("等了约 4 分钟还没生成完。任务可能仍在执行，稍后刷新或重试。");
   };
 
   const BTN = "rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50";
@@ -330,14 +352,14 @@ export default function AllocationPage() {
                 : "还没有生成解读"}
             </span>
           </div>
-          {/* 管理员触发按钮 */}
+          {/* 管理员触发按钮 + 查看解读报告（与 PEST 报告的「查看报告」对齐） */}
           <div className="mt-3 flex flex-wrap items-center gap-3">
             {admin
               ? <>
-                  <button type="button" onClick={() => handleInterp(false)} disabled={interpState === "generating"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>
-                    {interpState === "generating" ? "正在生成…" : interpretation ? "重新生成" : "生成 AI 解读"}
+                  <button type="button" onClick={() => handleInterp(false)} disabled={interpState === "submitting" || interpState === "running"} className={`${BTN} border-line-soft text-ink-2 hover:text-accent`}>
+                    {interpState === "submitting" || interpState === "running" ? "生成中…" : interpretation ? "重新生成" : "生成 AI 解读"}
                   </button>
-                  {interpretation && interpState !== "generating" && (
+                  {interpretation && interpState !== "submitting" && interpState !== "running" && (
                     <button type="button" onClick={() => handleInterp(true)} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>
                       强制覆盖生成
                     </button>
@@ -345,11 +367,22 @@ export default function AllocationPage() {
                 </>
               : <a href={loginLink} className={`${BTN} border-line-soft text-ink-3 hover:text-accent`}>登录后生成解读</a>
             }
-            {interpState === "generating" && <span className="text-[12px] text-ink-3">{interpMsg}</span>}
-            {interpState === "done" && <span className="text-[12px] text-accent">{interpMsg}</span>}
-            {interpState === "error" && <span className="text-[12px] text-hot">{interpMsg}</span>}
+            {interpretation && (
+              <IntentLink to={`/dashboard/allocation/report?t=${interpretation.generation}`} className={`${BTN} border-accent/40 text-accent hover:bg-accent/10`}>
+                查看解读报告
+              </IntentLink>
+            )}
             {interpState === "not-admin" && <span className="text-[12px] text-ink-4">{interpMsg}</span>}
           </div>
+          {/* 进度 / 完成提示 / 失败原因：生成中显示倒计时与进度条，完成后主动引导查看 */}
+          <GenerationProgress
+            phase={interpState === "not-admin" ? "idle" : interpState}
+            startedAt={interpStartedAt}
+            expectedSeconds={interpExpected}
+            message={interpMsg}
+            view={{ href: "/dashboard/allocation/report?t=latest", label: "查看 AI 解读报告" }}
+            onRetry={() => handleInterp(interpForce)}
+          />
           {interpretation && interpretation.regeneratedAt && (
             <p className="mt-2 text-[11.5px] text-ink-4">
               最后一次重新生成：{new Date(interpretation.regeneratedAt).toLocaleString("zh-CN", { hour12: false })}

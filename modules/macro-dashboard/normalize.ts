@@ -35,26 +35,57 @@ export interface SafeReportPayload {
   snapshot: string;
 }
 
+/** 任务运行记录里的 detail：定时任务存对象，队列任务存数组，这里统一成一个形状。 */
+export interface SafeJobDetail {
+  written: boolean | null;
+  reason: string | null;
+  collected: number | null;
+  generation: number | null;
+}
+
+export function safeJobDetail(raw: unknown): SafeJobDetail {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const d = record(value);
+  return {
+    written: typeof d.written === "boolean" ? d.written : null,
+    reason: typeof d.reason === "string" ? d.reason : null,
+    collected: typeof d.collected === "number" && Number.isFinite(d.collected) ? d.collected : null,
+    generation: typeof d.generation === "number" && Number.isFinite(d.generation) ? d.generation : null,
+  };
+}
+
+export interface SafeReportStatus {
+  job: string;
+  status: string;
+  at: string;
+  error: string | null;
+  detail: SafeJobDetail;
+  /** 任务开始时间（ISO），前端据此算倒计时；没有就 null。 */
+  startedAt: string | null;
+}
+
 export interface SafeReport {
   scope: string;
   at: string | null;
   model: string | null;
   payload: SafeReportPayload | null;
   missing: string | null;
-  status: { job: string; status: string; at: string; error: string | null; detail: Record<string, unknown> | null } | null;
+  status: SafeReportStatus | null;
 }
 
 /** 报告记录：没有 `at` 或 payload 不完整时一律当作「还没有报告」，走空状态而不是崩溃。 */
 export function safeReport(raw: unknown): SafeReport {
   const r = record(raw);
   const at = typeof r.at === "string" ? r.at : null;
-  const status = r.status && typeof r.status === "object" ? {
-    job: str(record(r.status).job),
-    status: str(record(r.status).status),
-    at: str(record(r.status).at),
-    error: typeof record(r.status).error === "string" ? record(r.status).error as string : null,
-    detail: r.status && typeof record(r.status).detail === "object" && record(r.status).detail !== null
-      ? record(record(r.status).detail) : null,
+  const rs = record(r.status);
+  const status: SafeReportStatus | null = r.status && typeof r.status === "object" && rs.status ? {
+    job: str(rs.job),
+    status: str(rs.status),
+    at: str(rs.at),
+    error: typeof rs.error === "string" ? rs.error : null,
+    // 队列任务的 detail 是数组，定时任务是对象；统一后页面才不会误判「没写出报告」。
+    detail: safeJobDetail(rs.detail),
+    startedAt: dateText(rs.startedAt),
   } : null;
   const base: SafeReport = {
     scope: str(r.scope, "CN"),
