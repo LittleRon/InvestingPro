@@ -269,24 +269,27 @@ export default function AllocationPage() {
 
         {/* AI 解读 */}
         <section className="card p-4 sm:p-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="text-[15px] font-semibold text-ink">AI 解读</h2>
-            <span className="text-[11.5px] text-ink-4">
-              {interpretation
-                ? <>生成于 {interpretation.at}{interpretation.generation > 1 && <> · 第 {interpretation.generation} 版</>}</>
-                : "还没有生成解读"}
-            </span>
-          </div>
-          {/* 管理员触发按钮 + 查看解读报告（与 PEST 报告的「查看报告」对齐） */}
-          {/* 生成按钮与 PEST 报告共用同一组件：登录检查、进度、完成引导、失败重试完全一致 */}
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <InterpretationNowButton onStatus={setInterpServerStatus} />
-            {interpretation && (
-              // 普通链接整页跳转，避开 SPA 页面复用缓存；不带日期，报告页按最新一版展示。
-              <a href="/dashboard/allocation/report" className={`${BTN} border-accent/40 text-accent hover:bg-accent/10`}>
-                查看解读报告
-              </a>
-            )}
+          <div className="analysis-action-panel">
+            <div className="analysis-action-copy">
+              <h2 className="analysis-action-title text-[15px] font-semibold text-ink">AI 解读</h2>
+              <span className="text-[11.5px] text-ink-4">
+                {interpretation
+                  ? <>生成于 {interpretation.at}{interpretation.generation > 1 && <> · 第 {interpretation.generation} 版</>}</>
+                  : "还没有生成解读"}
+              </span>
+              <p className="analysis-action-meta">基于当前配置、投资时钟和经济周期生成。规则引擎计算权重，AI 只负责撰写解读。</p>
+            </div>
+            {/* 管理员触发按钮 + 查看解读报告（与 PEST 报告的「查看报告」对齐） */}
+            {/* 生成按钮与 PEST 报告共用同一组件：登录检查、进度、完成引导、失败重试完全一致 */}
+            <div className="analysis-actions">
+              <InterpretationNowButton onStatus={setInterpServerStatus} />
+              {interpretation && (
+                // 普通链接整页跳转，避开 SPA 页面复用缓存；不带日期，报告页按最新一版展示。
+                <a href="/dashboard/allocation/report" className="analysis-action-link">
+                  查看解读报告
+                </a>
+              )}
+            </div>
           </div>
           {interpretation && interpretation.regeneratedAt && (
             <p className="mt-2 text-[11.5px] text-ink-4">

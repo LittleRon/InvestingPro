@@ -585,6 +585,40 @@
    language of the analysis product instead of the reading-feed paper surface.
    --------------------------------------------------------------------------- */
 .analysis-console {
+  --bg: #f2f7f5;
+  --bg-sunk: #e6f0ed;
+  --bg-muted: #d9e8e3;
+  --surface: #ffffff;
+  --surface-2: #f8fcfb;
+  --raised: #ffffff;
+  --ink: #17363b;
+  --ink-2: #2c4d52;
+  --ink-3: #557176;
+  --ink-4: #6c8589;
+  --line: #c7dad5;
+  --line-strong: #a9c4bd;
+  --line-soft: #dfeae7;
+  --accent: #177b74;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(23, 123, 116, 0.13);
+  --accent-softer: rgba(23, 123, 116, 0.07);
+  --accent-contrast: #ffffff;
+  --note: #547b77;
+  --hot: #b84c3c;
+  --hot-soft: rgba(184, 76, 60, 0.12);
+  --amber: #a97622;
+  --amber-ink: #805717;
+  --amber-soft: rgba(169, 118, 34, 0.13);
+  --ok: #197856;
+  --ok-soft: rgba(25, 120, 86, 0.12);
+  --ok-ink: #176c4e;
+  background: var(--bg);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sheet);
+  color: var(--ink);
+  padding: 12px clamp(12px, 2.5vw, 32px) 32px;
+}
+[data-theme="dark"] .analysis-console {
   --bg: #081216;
   --bg-sunk: #11252b;
   --bg-muted: #163139;
@@ -612,11 +646,6 @@
   --ok: #61d6b2;
   --ok-soft: rgba(97, 214, 178, 0.14);
   --ok-ink: #61d6b2;
-  background: var(--bg);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sheet);
-  color: var(--ink);
-  padding: 12px clamp(12px, 2.5vw, 32px) 32px;
 }
 .analysis-console .analysis-console__bar {
   display: flex;
@@ -649,10 +678,56 @@
   box-shadow: 0 14px 34px rgba(0, 0, 0, .18);
 }
 .analysis-console .card:hover { border-color: var(--line-strong); }
+.analysis-console .text-ink { color: var(--ink) !important; }
+.analysis-console .text-ink-2 { color: var(--ink-2) !important; }
+.analysis-console .text-ink-3 { color: var(--ink-3) !important; }
+.analysis-console .text-ink-4 { color: var(--ink-4) !important; }
+.analysis-console .text-accent { color: var(--accent) !important; }
+.analysis-console .text-hot { color: var(--hot) !important; }
+.analysis-console .border-line-soft { border-color: var(--line-soft) !important; }
+.analysis-console .border-accent\/40 { border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important; }
 .analysis-console .bg-bg-sunk { background-color: var(--bg-sunk); }
 .analysis-console .dark\:bg-bg-muted { background-color: var(--bg-muted); }
 .analysis-console .rounded-sheet { border-color: var(--line); }
 .analysis-console .analysis-console__bar + .phone-bar { border-color: var(--line); }
+.analysis-console .analysis-action-panel {
+  align-items: center;
+  display: grid;
+  gap: 22px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 320px);
+}
+.analysis-console .analysis-action-copy { min-width: 0; }
+.analysis-console .analysis-action-title { align-items: center; display: flex; gap: 9px; }
+.analysis-console .analysis-action-title::before {
+  background: var(--accent);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  content: "";
+  display: block;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+.analysis-console .analysis-action-meta { color: var(--ink-4); font-size: 12px; line-height: 1.7; margin-top: 6px; }
+.analysis-console .analysis-actions { align-items: stretch; display: flex; flex-direction: column; gap: 8px; }
+.analysis-console .analysis-action-link {
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--accent);
+  display: inline-flex;
+  font-size: 12.5px;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  transition: background-color 160ms, border-color 160ms, color 160ms;
+}
+.analysis-console .analysis-action-link:hover { background: var(--accent-soft); border-color: var(--accent); }
+
+@media (max-width: 800px) {
+  .analysis-console .analysis-action-panel { align-items: stretch; grid-template-columns: 1fr; }
+  .analysis-console .analysis-actions { max-width: 360px; }
+}
 
 @media (max-width: 640px) {
   .analysis-console { border-radius: 0; border-left: 0; border-right: 0; padding-inline: var(--gutter-l) var(--gutter-r); }

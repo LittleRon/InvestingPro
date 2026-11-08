@@ -397,10 +397,10 @@ export default function DashboardPage() {
         {blocks.map((b) => <PlainBlock key={b.key} block={b} />)}
       </div>
 
-      <section aria-label="每日 PEST 报告" className="card mt-4 flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
-        <div>
-          <h2 className="text-[15px] font-semibold text-ink">每日 PEST 分析</h2>
-          <p className="mt-1 text-[12.5px] leading-[1.7] text-ink-4">
+      <section aria-label="每日 PEST 报告" className="analysis-action-panel card mt-4 p-4 sm:p-5">
+        <div className="analysis-action-copy">
+          <h2 className="analysis-action-title text-[15px] font-semibold text-ink">每日 PEST 分析</h2>
+          <p className="analysis-action-meta">
             {data.latestReport ? (
               <>
                 最近一份：<span className="num">{data.latestReport.at}</span>，按政治、经济、社会、技术四个象限写当天的数据变化。
@@ -413,10 +413,10 @@ export default function DashboardPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="analysis-actions">
           <ReportNowButton scope={country} />
-          <IntentLink to={`/dashboard/report?scope=${country}`} className="rounded-full border border-line-soft px-3.5 py-1.5 text-[12.5px] text-ink-2 transition-colors hover:text-accent">
-            查看报告
+          <IntentLink to={`/dashboard/report?scope=${country}`} className="analysis-action-link">
+            查看 PEST 报告
           </IntentLink>
         </div>
       </section>
