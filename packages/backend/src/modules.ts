@@ -128,6 +128,8 @@ export interface SitemapEntry {
  * that made the change and, given one, inside its transaction.
  */
 export interface EngineHooks {
+  /** A source collection round was requested. Modules with external data collectors can enqueue their own refresh. */
+  collectionRequested: (change: { reason: "manual" | "scheduled" | "autopilot-enabled" | "source"; activity?: boolean }) => Promise<void>;
   /**
    * An article's public content changed; a former event is included when its membership moved.
    * `reduced`: something public is now shown less, as publication judged it (`PublishResult`).

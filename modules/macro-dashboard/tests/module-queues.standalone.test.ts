@@ -13,6 +13,13 @@ test("宏��模块的队列都登记了，worker 才会消费", () => {
   // 管理员点「立即编写今天」和「生成 AI 解读」走的这两个队列。
   assert.ok(names.includes("macro.report-now"), `macro.report-now is registered (got ${names.join(", ")})`);
   assert.ok(names.includes("macro.interp"), `macro.interp is registered (got ${names.join(", ")})`);
+  assert.ok(names.includes("macro.indicators"), `macro.indicators is registered (got ${names.join(", ")})`);
+});
+
+test("信源采集请求会交给宏观模块刷新真实指标", () => {
+  installModules(SERVER_MODULES);
+  const macro = serverModules().find((m) => m.name === "macro-dashboard");
+  assert.equal(typeof macro?.on?.collectionRequested, "function");
 });
 
 test("队列的名字是唯一的，不会两个模块抢同一个队列", () => {

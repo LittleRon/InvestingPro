@@ -10,7 +10,7 @@ import { sql, type Db } from "../db.ts";
 import { enqueue, QUEUES } from "../jobs/queue.ts";
 import { republishKey } from "../jobs/publication.ts";
 import { normalizeUrl } from "../lib/url.ts";
-import { serverModules } from "../modules.ts";
+import { emit, serverModules } from "../modules.ts";
 import { fetchJsonList } from "../sources/json-list.ts";
 import { fetchRss } from "../sources/rss.ts";
 import { assertSupportedConfig, UnsupportedConfig } from "../sources/config-keys.ts";
@@ -282,6 +282,7 @@ export async function fetchNow(id: string, actor: string) {
   const own = kindHooks(s.kind).find((h) => h.fetchNow)?.fetchNow;
   if (own) {
     await audit(actor, "source.fetch", `source:${id}`, null, null, await own(s));
+    await emit("collectionRequested", { reason: "source", activity: true });
     return { jobId: null };
   }
   const jobId =
@@ -289,5 +290,6 @@ export async function fetchNow(id: string, actor: string) {
       ? await enqueue(QUEUES.mpCheck, { sourceId: id, reason: "manual" }, { singletonKey: `mp:${id}` })
       : await enqueue(QUEUES.fetchSource, { sourceId: id, force: true }, { singletonKey: `manual:${id}` });
   await audit(actor, "source.fetch", `source:${id}`, null, null, { jobId });
+  await emit("collectionRequested", { reason: "source", activity: true });
   return { jobId };
 }

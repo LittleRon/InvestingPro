@@ -81,6 +81,14 @@ const INTERP_QUEUE = defineQueue<{ force?: boolean }>({
   }),
 });
 
+/** Refresh all configured macro market series when a source collection round starts. */
+const INDICATOR_QUEUE = defineQueue<{ reason?: string }>({
+  name: "macro.indicators",
+  options: { policy: "singleton", retryLimit: 1, expireInSeconds: 3600 },
+  worker: { batchSize: 1 },
+  run: async () => recordRun("macro.indicators", () => collectIndicators()),
+});
+
 export interface SeriesData {
   key: string;
   name: string;
@@ -317,6 +325,11 @@ async function loadDashboard(country: CountryKey, from: string | null, to: strin
 
 export default defineServerModule({
   name: "macro-dashboard",
+  on: {
+    collectionRequested: async ({ reason }) => {
+      await enqueueOn(INDICATOR_QUEUE, { reason }, { singletonKey: "macro-indicators" });
+    },
+  },
   http(app: FastifyInstance) {
     app.get("/api/site/dashboard", async (req, reply) => {
       const q = (req.query ?? {}) as Record<string, unknown>;
@@ -501,7 +514,7 @@ export default defineServerModule({
   },
   // 队列任务：worker 只监听模块在这里登记的队列（workModuleQueues 遍历 m.queues）。
   // 不登记的话任务会入队但没人消费，管理员点按钮后只会等到超时。
-  queues: [REPORT_NOW_QUEUE, INTERP_QUEUE],
+  queues: [REPORT_NOW_QUEUE, INTERP_QUEUE, INDICATOR_QUEUE],
   // 每天先采集再写报告，报告写的是采集完当天的快照。报告任务自己先采一轮（stale 机制
   // 保证不重复取），这样即使 06:30 的采集还没跑完或失败，06:40 的报告也不会因数据不足被跳过。
   schedules: [

@@ -12,6 +12,7 @@
 import { sql } from "../db.ts";
 import { audit } from "../audit.ts";
 import { scheduleDueSources } from "./collect.ts";
+import { emit } from "../modules.ts";
 
 export const AUTOPILOT_KEY = "collection.autopilot";
 
@@ -62,6 +63,7 @@ export async function setAutoCollect(enabled: boolean, reason: string, actor: st
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`;
   await audit(actor, enabled ? "collection.autopilot.on" : "collection.autopilot.off", `settings:${AUTOPILOT_KEY}`, reason,
     { enabled: before }, { enabled });
+  if (enabled) await emit("collectionRequested", { reason: "autopilot-enabled", activity: true });
   return { enabled, before };
 }
 
@@ -73,5 +75,6 @@ export async function setAutoCollect(enabled: boolean, reason: string, actor: st
 export async function collectRoundNow(reason: string, actor: string) {
   const result = await scheduleDueSources();
   await audit(actor, "collection.round", `settings:${AUTOPILOT_KEY}`, reason.trim() || null, null, result);
+  await emit("collectionRequested", { reason: "manual", activity: true });
   return result;
 }

@@ -2,7 +2,7 @@
 // job_runs; missed slots run once.
 import type { PgBoss } from "pg-boss";
 import { ensureQueue, recordRun } from "@aihot/backend/jobs/queue";
-import { responder, serverModules, type Scheduled } from "@aihot/backend/modules";
+import { emit, responder, serverModules, type Scheduled } from "@aihot/backend/modules";
 import { sweepUnprocessed } from "@aihot/backend/jobs/content";
 import { translatePending } from "@aihot/backend/editorial/translate";
 import { adaptIntervals, scheduleDueSources } from "@aihot/backend/sources/collect";
@@ -31,6 +31,14 @@ const collecting = process.env.COLLECT_ENABLED === "true";
 const onSchedule = <T>(run: () => Promise<T>) => async (): Promise<T | { paused: true }> =>
   (await autoCollectEnabled()) ? run() : { paused: true };
 
+const scheduleSourcesAndRefreshModules = async () => {
+  const result = await scheduleDueSources();
+  if (result.enqueued > 0 || result.shards > 0) {
+    await emit("collectionRequested", { reason: "scheduled", activity: true });
+  }
+  return result;
+};
+
 const ENGINE_SCHEDULES: Scheduled[] = [
   { name: "content.sweep", cron: "*/5 * * * *", run: sweepUnprocessed },
   // Full-text translations of newly selected items (model calls; off with MODEL_CALLS_ENABLED=false).
@@ -58,7 +66,7 @@ const ENGINE_SCHEDULES: Scheduled[] = [
   { name: "reports.source-health", cron: "0 9 * * 1", missed: "once", run: () => sourceHealthWeekly(), when: () => !responder() },
   ...(collecting
     ? [
-        { name: "sources.schedule", cron: "* * * * *", run: onSchedule(scheduleDueSources) },
+        { name: "sources.schedule", cron: "* * * * *", run: onSchedule(scheduleSourcesAndRefreshModules) },
         { name: "sources.adapt-intervals", cron: "20 4 * * *", run: onSchedule(adaptIntervals) },
         // Icons are read from the sources' own sites, so they stop with collection.
         { name: "sources.icons", cron: "40 4 * * *", missed: "once" as const, run: onSchedule(refreshSourceIcons) },
